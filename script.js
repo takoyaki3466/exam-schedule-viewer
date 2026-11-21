@@ -1,16 +1,18 @@
 /**
- * 定期試験日程 検索・管理データベース (script.js)
- * - シート数1固定・行数可変（毎年再利用可能）のExcelファイルをブラウザ上で直接解析
- * - SheetJSマルチCDNフォールバック搭載
- * - PC向けテーブル表示 / スマホモード（カード表示・折りたたみ絞り込み）切替対応
- * - IndexedDB（フォールバック: localStorage）によるローカルデータベース永続化
+ * 定期試験日程データベース (script.js)
+ * - スマートフォン最優先のレスポンシブカードUI
+ * - 左スライドイン絞り込みドロワ（学科・校舎・試験日・曜日・時限・追評価実施有無）
+ * - 未適用変更時の確認モーダル（変更を適用して絞り込む / 変更を破棄して閉じる）
+ * - 科目詳細モーダル（全10項目表示・フォーカストラップ・キーボード対応）
+ * - 実処理と連動する単色濃淡スケルトンUI
+ * - IndexedDB（フォールバック: localStorage）によるローカル永続化・重複検出・ICS/PDF出力維持
  */
 
 (() => {
   'use strict';
 
   // =========================================================================
-  // 0. Dynamic SheetJS Loader (Fallback if primary CDN is blocked/slow)
+  // 0. Dynamic SheetJS Loader (Fallback if primary CDN is slow/blocked)
   // =========================================================================
   const XLSX_CDNS = [
     'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js',
@@ -56,7 +58,6 @@
   const DB_NAME = 'UniversityExamScheduleDB_v1';
   const DB_VERSION = 1;
   const STORE_NAME = 'appState';
-  const MOBILE_PREF_KEY = `${DB_NAME}_mobileMode`;
 
   const StorageService = {
     openDB() {
@@ -127,16 +128,17 @@
   };
 
   // =========================================================================
-  // 2. Normalization & Parsing Utilities
+  // 2. Normalization & Excel Row Parsing Utilities
   // =========================================================================
   const DAY_ORDER = { '月': 1, '火': 2, '水': 3, '木': 4, '金': 5, '土': 6, '日': 7 };
+  const ALL_WEEKDAYS = ['月', '火', '水', '木', '金', '土', '日'];
 
   function normalizeText(value) {
     if (value === null || value === undefined) return '';
     return String(value)
-      .normalize('NFKC')
-      .toLowerCase()
-      .replace(/[\s　]+/g, '');
+        .normalize('NFKC')
+        .toLowerCase()
+        .replace(/[\s ]+/g, '');
   }
 
   function cleanCell(value) {
@@ -157,11 +159,6 @@
     return matches.map((n) => parseInt(n, 10));
   }
 
-  /**
-   * 試験日時文字列を構造化データへ変換
-   * 例: "12月21日(月)3時限", "1月12日(火)1・2時限"
-   * 4月〜12月を年度前半(month)、1月〜3月を年度後半(month + 12)として時系列ソートキーを算出
-   */
   function parseExamDateTime(rawDateTime) {
     const text = cleanCell(rawDateTime);
     if (!text) {
@@ -222,11 +219,6 @@
     };
   }
 
-  /**
-   * 2次元配列（行数の制約なし）から試験レコード配列を構築
-   * - 左端に空列がある場合も自動オフセット検出
-   * - タイトル行・見出し行・空行を自動スキップ
-   */
   function parseRowsToRecords(rows) {
     const records = [];
 
@@ -235,8 +227,8 @@
       const row = rows[r];
       if (!Array.isArray(row)) continue;
       const nonEmptyIndices = row
-        .map((v, idx) => (cleanCell(v) !== '' ? idx : -1))
-        .filter((idx) => idx >= 0);
+          .map((v, idx) => (cleanCell(v) !== '' ? idx : -1))
+          .filter((idx) => idx >= 0);
       if (nonEmptyIndices.length >= 6) {
         colOffset = nonEmptyIndices[0];
         break;
@@ -246,25 +238,25 @@
     rows.forEach((row, index) => {
       if (!Array.isArray(row)) return;
 
-      const c0 = cleanCell(row[colOffset + 0]);
-      const c1 = cleanCell(row[colOffset + 1]);
-      const c2 = cleanCell(row[colOffset + 2]);
-      const c3 = cleanCell(row[colOffset + 3]);
-      const c4 = normalizePeriodDisplay(row[colOffset + 4]);
-      const c5 = cleanCell(row[colOffset + 5]);
-      const c6 = cleanCell(row[colOffset + 6]);
-      const c7 = cleanCell(row[colOffset + 7]);
-      const c8 = cleanCell(row[colOffset + 8]);
-      const c9 = cleanCell(row[colOffset + 9]);
-      const c10 = cleanCell(row[colOffset + 10]);
+      const c0 = cleanCell(row[colOffset + 0]); // No.
+      const c1 = cleanCell(row[colOffset + 1]); // 学科
+      const c2 = cleanCell(row[colOffset + 2]); // 時間割コード
+      const c3 = cleanCell(row[colOffset + 3]); // 曜日
+      const c4 = normalizePeriodDisplay(row[colOffset + 4]); // 時限
+      const c5 = cleanCell(row[colOffset + 5]); // 科目名
+      const c6 = cleanCell(row[colOffset + 6]); // 担当教員
+      const c7 = cleanCell(row[colOffset + 7]); // 校舎
+      const c8 = cleanCell(row[colOffset + 8]); // 理解度確認テスト日程
+      const c9 = cleanCell(row[colOffset + 9]); // 理解度確認テスト実施教室
+      const c10 = cleanCell(row[colOffset + 10]); // 追評価の実施
 
       const nonEmptyCount = [c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10].filter(Boolean).length;
       if (nonEmptyCount < 3) return;
 
       if (
-        index <= 2 &&
-        isNaN(Number(c0)) &&
-        (c3.includes('曜日') || c5.includes('科目') || c8.includes('試験') || c1.includes('学科'))
+          index <= 2 &&
+          isNaN(Number(c0)) &&
+          (c3.includes('曜日') || c5.includes('科目') || c8.includes('試験') || c8.includes('テスト') || c1.includes('学科'))
       ) {
         return;
       }
@@ -315,25 +307,49 @@
   // =========================================================================
   // 3. Application State
   // =========================================================================
+  function createEmptyFilters() {
+    return {
+      query: '',
+      dept: '',
+      campus: '', // Single-select chip
+      examDates: new Set(), // Multi-select chips
+      regDays: new Set(), // Multi-select chips
+      regPeriods: new Set(), // Multi-select chips
+      status: '' // Segmented control: '' | '実施する' | '実施しない'
+    };
+  }
+
+  function cloneFilters(src) {
+    return {
+      query: src.query || '',
+      dept: src.dept || '',
+      campus: src.campus || '',
+      examDates: new Set(src.examDates || []),
+      regDays: new Set(src.regDays || []),
+      regPeriods: new Set(src.regPeriods || []),
+      status: src.status || ''
+    };
+  }
+
   const state = {
     records: [],
     meta: null,
     pinnedKeys: new Set(),
     conflictUids: new Set(),
-    viewMode: 'all', // 'all' | 'pinned' | 'timeline'
-    mobileMode: false,
-    mobileModeManual: false,
-    mobileFiltersOpen: false,
-    filters: {
-      query: '',
-      dept: '',
-      campus: '',
-      examDate: '',
-      regDay: '',
-      regPeriod: '',
-      status: ''
+    viewMode: 'all', // 'all' | 'pinned'
+    appliedFilters: createEmptyFilters(),
+    draftFilters: createEmptyFilters(),
+    sortBy: 'examDate_asc',
+    availableOptions: {
+      depts: [], // [{ value, count }]
+      campuses: [], // [{ value, count }]
+      examDates: [], // [{ value, count, sortKey }]
+      regPeriods: [] // [string]
     },
-    sortBy: 'examDate_asc'
+    isDrawerOpen: false,
+    isUnsavedModalOpen: false,
+    activeDetailRecord: null,
+    lastFocusedElement: null
   };
 
   // =========================================================================
@@ -342,8 +358,6 @@
   const dom = {
     globalDropOverlay: document.getElementById('globalDropOverlay'),
     dbMetaText: document.getElementById('dbMetaText'),
-    mobileModeBtn: document.getElementById('mobileModeBtn'),
-    mobileModeBtnLabel: document.getElementById('mobileModeBtnLabel'),
     uploadPanel: document.getElementById('uploadPanel'),
     toggleUploadBtn: document.getElementById('toggleUploadBtn'),
     loadSampleBtn: document.getElementById('loadSampleBtn'),
@@ -368,37 +382,60 @@
 
     searchInput: document.getElementById('searchInput'),
     clearSearchBtn: document.getElementById('clearSearchBtn'),
+    openFilterDrawerBtn: document.getElementById('openFilterDrawerBtn'),
+    activeFilterBadge: document.getElementById('activeFilterBadge'),
     sortSelect: document.getElementById('sortSelect'),
 
-    toggleMobileFiltersBtn: document.getElementById('toggleMobileFiltersBtn'),
-    activeFilterCountBadge: document.getElementById('activeFilterCountBadge'),
-    mobileFilterChevron: document.getElementById('mobileFilterChevron'),
-    filterGrid: document.getElementById('filterGrid'),
-
-    filterDept: document.getElementById('filterDept'),
-    filterCampus: document.getElementById('filterCampus'),
-    filterExamDate: document.getElementById('filterExamDate'),
-    filterRegDay: document.getElementById('filterRegDay'),
-    filterRegPeriod: document.getElementById('filterRegPeriod'),
-    filterStatus: document.getElementById('filterStatus'),
-    resetFiltersBtn: document.getElementById('resetFiltersBtn'),
+    activeFiltersBar: document.getElementById('activeFiltersBar'),
+    activeFilterTags: document.getElementById('activeFilterTags'),
+    quickClearAllFiltersBtn: document.getElementById('quickClearAllFiltersBtn'),
     resultStats: document.getElementById('resultStats'),
 
-    tableView: document.getElementById('tableView'),
-    tableBody: document.getElementById('tableBody'),
-    mobileCardList: document.getElementById('mobileCardList'),
-    sortableHeaders: document.querySelectorAll('th.sortable'),
+    scheduleListSection: document.getElementById('scheduleListSection'),
+    skeletonGrid: document.getElementById('skeletonGrid'),
+    cardListContainer: document.getElementById('cardListContainer'),
     emptyState: document.getElementById('emptyState'),
     emptyTitle: document.getElementById('emptyTitle'),
     emptyDesc: document.getElementById('emptyDesc'),
 
-    timelineView: document.getElementById('timelineView'),
-
     printTitle: document.getElementById('printTitle'),
     printMeta: document.getElementById('printMeta'),
+    printTableBody: document.getElementById('printTableBody'),
+
+    // Left Filter Drawer
+    filterDrawerBackdrop: document.getElementById('filterDrawerBackdrop'),
+    filterDrawer: document.getElementById('filterDrawer'),
+    closeFilterDrawerBtn: document.getElementById('closeFilterDrawerBtn'),
+    drawerFilterDept: document.getElementById('drawerFilterDept'),
+    drawerCampusChips: document.getElementById('drawerCampusChips'),
+    drawerExamDateChips: document.getElementById('drawerExamDateChips'),
+    drawerRegDayChips: document.getElementById('drawerRegDayChips'),
+    drawerRegPeriodChips: document.getElementById('drawerRegPeriodChips'),
+    drawerStatusSegments: document.getElementById('drawerStatusSegments'),
+    drawerResetBtn: document.getElementById('drawerResetBtn'),
+    drawerApplyBtn: document.getElementById('drawerApplyBtn'),
+
+    // Unsaved Changes Modal
+    unsavedModalBackdrop: document.getElementById('unsavedModalBackdrop'),
+    unsavedConfirmModal: document.getElementById('unsavedConfirmModal'),
+    unsavedApplyBtn: document.getElementById('unsavedApplyBtn'),
+    unsavedDiscardBtn: document.getElementById('unsavedDiscardBtn'),
+
+    // Subject Detail Modal
+    detailModalBackdrop: document.getElementById('detailModalBackdrop'),
+    detailModal: document.getElementById('detailModal'),
+    closeDetailModalBtn: document.getElementById('closeDetailModalBtn'),
+    detailModalTitle: document.getElementById('detailModalTitle'),
+    detailModalBody: document.getElementById('detailModalBody'),
+    detailModalPinBtn: document.getElementById('detailModalPinBtn'),
+    detailModalCloseFooterBtn: document.getElementById('detailModalCloseFooterBtn'),
+
     toast: document.getElementById('toast')
   };
 
+  // =========================================================================
+  // 5. UI Helpers: Toast, Errors & Real-Processing Skeleton Controller
+  // =========================================================================
   let toastTimer = null;
   function showToast(message) {
     dom.toast.textContent = message;
@@ -419,71 +456,69 @@
     dom.errorMessage.textContent = '';
   }
 
+  /**
+   * 実際の非同期処理・検索デバウンス・再描画フレームに連動したスケルトン制御
+   * 人為的な遅延は追加しない
+   */
+  let activeLoadingTokens = 0;
+  function beginSkeletonLoading() {
+    activeLoadingTokens += 1;
+    dom.scheduleListSection.setAttribute('aria-busy', 'true');
+    dom.skeletonGrid.classList.remove('hidden');
+    dom.cardListContainer.classList.add('hidden');
+    dom.emptyState.classList.add('hidden');
+  }
+
+  function endSkeletonLoading() {
+    activeLoadingTokens = Math.max(0, activeLoadingTokens - 1);
+    if (activeLoadingTokens === 0) {
+      dom.scheduleListSection.setAttribute('aria-busy', 'false');
+      dom.skeletonGrid.classList.add('hidden');
+      dom.cardListContainer.classList.remove('hidden');
+    }
+  }
+
+  function syncBodyScrollLock() {
+    const hasOpenOverlay =
+        state.isDrawerOpen || state.isUnsavedModalOpen || Boolean(state.activeDetailRecord);
+    document.body.classList.toggle('overlay-open', hasOpenOverlay);
+  }
+
   // =========================================================================
-  // 4.5 Smartphone Mode Controller
+  // 6. Focus Trap Utility for Drawer & Modals
   // =========================================================================
-  function applyMobileMode(enabled) {
-    state.mobileMode = Boolean(enabled);
-    document.body.classList.toggle('mobile-mode', state.mobileMode);
-
-    dom.mobileModeBtn.setAttribute('aria-pressed', state.mobileMode ? 'true' : 'false');
-    dom.mobileModeBtn.classList.toggle('btn-mode-active', state.mobileMode);
-    dom.mobileModeBtnLabel.textContent = state.mobileMode ? 'スマホ表示: ON' : 'スマホモード';
-
-    syncMobileFilterDrawer();
+  function getFocusableElements(container) {
+    if (!container) return [];
+    const selector =
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    return Array.from(container.querySelectorAll(selector)).filter(
+        (el) => !el.classList.contains('hidden') && el.offsetParent !== null
+    );
   }
 
-  function syncMobileFilterDrawer() {
-    if (!state.mobileMode) {
-      dom.filterGrid.classList.remove('mobile-collapsed');
-      return;
-    }
-    dom.filterGrid.classList.toggle('mobile-collapsed', !state.mobileFiltersOpen);
-    dom.toggleMobileFiltersBtn.setAttribute('aria-expanded', state.mobileFiltersOpen ? 'true' : 'false');
-    dom.mobileFilterChevron.textContent = state.mobileFiltersOpen ? '▲' : '▼';
-  }
+  function handleContainerTabTrap(e, container) {
+    if (e.key !== 'Tab') return;
+    const focusables = getFocusableElements(container);
+    if (focusables.length === 0) return;
 
-  function updateActiveFilterBadge() {
-    const keys = ['dept', 'campus', 'examDate', 'regDay', 'regPeriod', 'status'];
-    const activeCount = keys.filter((k) => Boolean(state.filters[k])).length;
-    if (activeCount > 0) {
-      dom.activeFilterCountBadge.textContent = `${activeCount}件適用中`;
-      dom.activeFilterCountBadge.classList.remove('hidden');
-    } else {
-      dom.activeFilterCountBadge.classList.add('hidden');
-    }
-  }
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
 
-  function initMobileMode() {
-    const savedPref = localStorage.getItem(MOBILE_PREF_KEY);
-    const mq = window.matchMedia('(max-width: 768px)');
-
-    if (savedPref === 'on') {
-      state.mobileModeManual = true;
-      applyMobileMode(true);
-    } else if (savedPref === 'off') {
-      state.mobileModeManual = true;
-      applyMobileMode(false);
-    } else {
-      state.mobileModeManual = false;
-      applyMobileMode(mq.matches);
-    }
-
-    const handleMediaChange = (e) => {
-      if (!state.mobileModeManual) {
-        applyMobileMode(e.matches);
+    if (e.shiftKey) {
+      if (document.activeElement === first || !container.contains(document.activeElement)) {
+        e.preventDefault();
+        last.focus();
       }
-    };
-
-    if (typeof mq.addEventListener === 'function') {
-      mq.addEventListener('change', handleMediaChange);
-    } else if (typeof mq.addListener === 'function') {
-      mq.addListener(handleMediaChange);
+    } else {
+      if (document.activeElement === last || !container.contains(document.activeElement)) {
+        e.preventDefault();
+        first.focus();
+      }
     }
   }
 
   // =========================================================================
-  // 5. Excel File Ingestion
+  // 7. Excel File Ingestion (with Skeleton on Slow Network / File Read)
   // =========================================================================
   function readFileAsArrayBuffer(file) {
     if (typeof file.arrayBuffer === 'function') {
@@ -500,6 +535,7 @@
   async function handleExcelFile(file) {
     if (!file) return;
     hideError();
+    beginSkeletonLoading();
 
     try {
       const XLSXLib = await ensureXlsxLoaded();
@@ -527,7 +563,7 @@
 
       if (parsed.length === 0) {
         showError(
-          `「${file.name}」から有効な試験データ行を検出できませんでした。11列構成（通し番号・学科・クラス・曜日・時限・科目名・担当教員・校舎・試験日時・教室・実施有無）になっているか確認してください。`
+            `「${file.name}」から有効な試験データ行を検出できませんでした。11列構成（No.・学科・時間割コード・曜日・時限・科目名・担当教員・校舎・理解度確認テスト日程・実施教室・追評価の実施）になっているか確認してください。`
         );
         return;
       }
@@ -547,39 +583,48 @@
 
       dom.uploadPanel.classList.add('hidden');
       refreshAllUI();
-      showToast(`「${file.name}」から ${parsed.length} 件のデータをデータベース化しました`);
+      showToast(`「${file.name}」から ${parsed.length} 件のデータを読み込みました`);
     } catch (err) {
       console.error(err);
       showError(`ファイル読み込みエラー: ${err?.message || '不明なエラーが発生しました'}`);
+    } finally {
+      endSkeletonLoading();
+      renderCurrentView();
     }
   }
 
   async function loadSampleDataset() {
     hideError();
-    const rawRows = window.__SAMPLE_EXAM_ROWS__ || [];
-    const parsed = parseRowsToRecords(rawRows);
-    const meta = {
-      fileName: 'テスト一覧例エクセル.xlsx（サンプル）',
-      sheetName: 'Sheet1',
-      totalRows: parsed.length,
-      updatedAt: new Date().toLocaleString('ja-JP')
-    };
+    beginSkeletonLoading();
+    try {
+      const rawRows = window.__SAMPLE_EXAM_ROWS__ || [];
+      const parsed = parseRowsToRecords(rawRows);
+      const meta = {
+        fileName: 'テスト一覧例エクセル.xlsx（サンプル）',
+        sheetName: 'Sheet1',
+        totalRows: parsed.length,
+        updatedAt: new Date().toLocaleString('ja-JP')
+      };
 
-    state.records = parsed;
-    state.meta = meta;
+      state.records = parsed;
+      state.meta = meta;
 
-    await StorageService.set('records', parsed);
-    await StorageService.set('meta', meta);
+      await StorageService.set('records', parsed);
+      await StorageService.set('meta', meta);
 
-    dom.uploadPanel.classList.add('hidden');
-    refreshAllUI();
-    showToast(`サンプルデータ（${parsed.length}件）を読み込みました`);
+      dom.uploadPanel.classList.add('hidden');
+      refreshAllUI();
+      showToast(`サンプルデータ（${parsed.length}件）を読み込みました`);
+    } finally {
+      endSkeletonLoading();
+      renderCurrentView();
+    }
   }
 
   // =========================================================================
-  // 6. Dynamic Filter Options & Conflict Detection
+  // 8. Build Filter Options & Conflict Detection
   // =========================================================================
-  function populateFilterDropdowns() {
+  function buildAvailableFilterOptions() {
     const depts = new Map();
     const campuses = new Map();
     const examDates = new Map();
@@ -603,63 +648,41 @@
       }
     });
 
-    const prevDept = state.filters.dept;
-    dom.filterDept.innerHTML = '<option value="">すべての学科・区分</option>';
-    [...depts.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0], 'ja'))
-      .forEach(([dept, count]) => {
-        const opt = document.createElement('option');
-        opt.value = dept;
-        opt.textContent = `${dept} (${count})`;
-        dom.filterDept.appendChild(opt);
-      });
-    dom.filterDept.value = depts.has(prevDept) ? prevDept : '';
-    state.filters.dept = dom.filterDept.value;
+    state.availableOptions.depts = [...depts.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0], 'ja'))
+        .map(([value, count]) => ({ value, count }));
 
-    const prevCampus = state.filters.campus;
-    dom.filterCampus.innerHTML = '<option value="">すべての校舎</option>';
-    [...campuses.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0], 'ja'))
-      .forEach(([campus, count]) => {
-        const opt = document.createElement('option');
-        opt.value = campus;
-        opt.textContent = `${campus} (${count})`;
-        dom.filterCampus.appendChild(opt);
-      });
-    dom.filterCampus.value = campuses.has(prevCampus) ? prevCampus : '';
-    state.filters.campus = dom.filterCampus.value;
+    state.availableOptions.campuses = [...campuses.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0], 'ja'))
+        .map(([value, count]) => ({ value, count }));
 
-    const prevExamDate = state.filters.examDate;
-    dom.filterExamDate.innerHTML = '<option value="">すべての試験日</option>';
-    [...examDates.entries()]
-      .sort((a, b) => a[1].sortKey - b[1].sortKey)
-      .forEach(([label, info]) => {
-        const opt = document.createElement('option');
-        opt.value = label;
-        opt.textContent = `${label} (${info.count})`;
-        dom.filterExamDate.appendChild(opt);
-      });
-    dom.filterExamDate.value = examDates.has(prevExamDate) ? prevExamDate : '';
-    state.filters.examDate = dom.filterExamDate.value;
+    state.availableOptions.examDates = [...examDates.entries()]
+        .sort((a, b) => a[1].sortKey - b[1].sortKey)
+        .map(([value, info]) => ({ value, count: info.count, sortKey: info.sortKey }));
 
-    const prevRegPeriod = state.filters.regPeriod;
-    dom.filterRegPeriod.innerHTML = '<option value="">すべて</option>';
-    [...regPeriods]
-      .sort((a, b) => a.localeCompare(b, 'ja', { numeric: true }))
-      .forEach((p) => {
-        const opt = document.createElement('option');
-        opt.value = p;
-        opt.textContent = `${p}時限`;
-        dom.filterRegPeriod.appendChild(opt);
-      });
-    dom.filterRegPeriod.value = regPeriods.has(prevRegPeriod) ? prevRegPeriod : '';
-    state.filters.regPeriod = dom.filterRegPeriod.value;
+    state.availableOptions.regPeriods = [...regPeriods].sort((a, b) =>
+        a.localeCompare(b, 'ja', { numeric: true })
+    );
+
+    // Prune invalid selections if dataset changed
+    if (state.appliedFilters.dept && !depts.has(state.appliedFilters.dept)) {
+      state.appliedFilters.dept = '';
+    }
+    if (state.appliedFilters.campus && !campuses.has(state.appliedFilters.campus)) {
+      state.appliedFilters.campus = '';
+    }
+    for (const d of [...state.appliedFilters.examDates]) {
+      if (!examDates.has(d)) state.appliedFilters.examDates.delete(d);
+    }
+    for (const p of [...state.appliedFilters.regPeriods]) {
+      if (!regPeriods.has(p)) state.appliedFilters.regPeriods.delete(p);
+    }
   }
 
   function detectPinnedConflicts() {
     state.conflictUids.clear();
     const pinnedRecords = state.records.filter(
-      (r) => state.pinnedKeys.has(r.stableKey) && r.status !== '実施しない' && r.examMonth !== null
+        (r) => state.pinnedKeys.has(r.stableKey) && r.examMonth !== null
     );
 
     const conflictMessages = [];
@@ -674,7 +697,7 @@
             state.conflictUids.add(a.uid);
             state.conflictUids.add(b.uid);
             conflictMessages.push(
-              `【${a.examDateLabel} ${a.examPeriodLabel}】「${a.subject}」と「${b.subject}」が重複しています`
+                `【${a.examDateLabel} ${a.examPeriodLabel}】「${a.subject}」と「${b.subject}」が重複しています`
             );
           }
         }
@@ -691,31 +714,337 @@
   }
 
   // =========================================================================
-  // 7. Filtering & Sorting Pipeline
+  // 9. Left Filter Drawer Rendering & State Comparison
+  // =========================================================================
+  function setsAreEqual(setA, setB) {
+    if (setA.size !== setB.size) return false;
+    for (const item of setA) {
+      if (!setB.has(item)) return false;
+    }
+    return true;
+  }
+
+  function hasUnsavedDrawerChanges() {
+    const a = state.appliedFilters;
+    const d = state.draftFilters;
+    if (a.dept !== d.dept) return true;
+    if (a.campus !== d.campus) return true;
+    if (a.status !== d.status) return true;
+    if (!setsAreEqual(a.examDates, d.examDates)) return true;
+    if (!setsAreEqual(a.regDays, d.regDays)) return true;
+    if (!setsAreEqual(a.regPeriods, d.regPeriods)) return true;
+    return false;
+  }
+
+  function renderDrawerControls() {
+    const draft = state.draftFilters;
+
+    // 1. 学科・区分 Dropdown
+    dom.drawerFilterDept.innerHTML = '<option value="">すべての学科・区分</option>';
+    state.availableOptions.depts.forEach(({ value, count }) => {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = `${value} (${count})`;
+      dom.drawerFilterDept.appendChild(opt);
+    });
+    dom.drawerFilterDept.value = draft.dept;
+
+    // 2. 校舎 Chips (Single-select)
+    dom.drawerCampusChips.innerHTML = '';
+    if (state.availableOptions.campuses.length === 0) {
+      dom.drawerCampusChips.innerHTML = '<span class="drawer-hint">データ読込後に表示されます</span>';
+    } else {
+      state.availableOptions.campuses.forEach(({ value }) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        const isSelected = draft.campus === value;
+        btn.className = `chip-btn${isSelected ? ' selected' : ''}`;
+        btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+        btn.textContent = value;
+        btn.addEventListener('click', () => {
+          state.draftFilters.campus = state.draftFilters.campus === value ? '' : value;
+          renderDrawerControls();
+        });
+        dom.drawerCampusChips.appendChild(btn);
+      });
+    }
+
+    // 3. 試験日 Chips (Multi-select)
+    dom.drawerExamDateChips.innerHTML = '';
+    if (state.availableOptions.examDates.length === 0) {
+      dom.drawerExamDateChips.innerHTML = '<span class="drawer-hint">データ読込後に表示されます</span>';
+    } else {
+      state.availableOptions.examDates.forEach(({ value }) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        const isSelected = draft.examDates.has(value);
+        btn.className = `chip-btn${isSelected ? ' selected' : ''}`;
+        btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+        btn.textContent = value;
+        btn.addEventListener('click', () => {
+          if (state.draftFilters.examDates.has(value)) {
+            state.draftFilters.examDates.delete(value);
+          } else {
+            state.draftFilters.examDates.add(value);
+          }
+          renderDrawerControls();
+        });
+        dom.drawerExamDateChips.appendChild(btn);
+      });
+    }
+
+    // 4. 通常授業の曜日 Chips (Multi-select, Mon-Sun)
+    dom.drawerRegDayChips.innerHTML = '';
+    ALL_WEEKDAYS.forEach((dayChar) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const isSelected = draft.regDays.has(dayChar);
+      btn.className = `chip-btn${isSelected ? ' selected' : ''}`;
+      btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+      btn.textContent = `${dayChar}曜`;
+      btn.addEventListener('click', () => {
+        if (state.draftFilters.regDays.has(dayChar)) {
+          state.draftFilters.regDays.delete(dayChar);
+        } else {
+          state.draftFilters.regDays.add(dayChar);
+        }
+        renderDrawerControls();
+      });
+      dom.drawerRegDayChips.appendChild(btn);
+    });
+
+    // 5. 通常授業の時限 Chips (Multi-select)
+    dom.drawerRegPeriodChips.innerHTML = '';
+    if (state.availableOptions.regPeriods.length === 0) {
+      dom.drawerRegPeriodChips.innerHTML = '<span class="drawer-hint">データ読込後に表示されます</span>';
+    } else {
+      state.availableOptions.regPeriods.forEach((periodVal) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        const isSelected = draft.regPeriods.has(periodVal);
+        btn.className = `chip-btn${isSelected ? ' selected' : ''}`;
+        btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+        btn.textContent = `${periodVal}時限`;
+        btn.addEventListener('click', () => {
+          if (state.draftFilters.regPeriods.has(periodVal)) {
+            state.draftFilters.regPeriods.delete(periodVal);
+          } else {
+            state.draftFilters.regPeriods.add(periodVal);
+          }
+          renderDrawerControls();
+        });
+        dom.drawerRegPeriodChips.appendChild(btn);
+      });
+    }
+
+    // 6. 追評価の実施有無 Segmented Control
+    const segButtons = dom.drawerStatusSegments.querySelectorAll('.segment-btn');
+    segButtons.forEach((btn) => {
+      const val = btn.dataset.value || '';
+      const isActive = draft.status === val;
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-checked', isActive ? 'true' : 'false');
+    });
+  }
+
+  function openFilterDrawer() {
+    state.lastFocusedElement = document.activeElement;
+    state.draftFilters = cloneFilters(state.appliedFilters);
+    renderDrawerControls();
+
+    state.isDrawerOpen = true;
+    dom.openFilterDrawerBtn.setAttribute('aria-expanded', 'true');
+    dom.filterDrawerBackdrop.classList.remove('hidden');
+    dom.filterDrawer.classList.remove('hidden');
+    syncBodyScrollLock();
+
+    requestAnimationFrame(() => {
+      dom.filterDrawer.classList.add('is-open');
+      dom.closeFilterDrawerBtn.focus();
+    });
+  }
+
+  function closeFilterDrawerImmediate() {
+    state.isDrawerOpen = false;
+    dom.openFilterDrawerBtn.setAttribute('aria-expanded', 'false');
+    dom.filterDrawer.classList.remove('is-open');
+    dom.filterDrawerBackdrop.classList.add('hidden');
+    dom.filterDrawer.classList.add('hidden');
+    syncBodyScrollLock();
+
+    if (state.lastFocusedElement && typeof state.lastFocusedElement.focus === 'function') {
+      state.lastFocusedElement.focus();
+    }
+  }
+
+  function requestCloseFilterDrawer() {
+    if (hasUnsavedDrawerChanges()) {
+      openUnsavedConfirmModal();
+    } else {
+      closeFilterDrawerImmediate();
+    }
+  }
+
+  function applyDraftFiltersAndClose() {
+    state.appliedFilters = cloneFilters(state.draftFilters);
+    closeUnsavedConfirmModal();
+    closeFilterDrawerImmediate();
+
+    beginSkeletonLoading();
+    requestAnimationFrame(() => {
+      renderCurrentView();
+      requestAnimationFrame(() => {
+        endSkeletonLoading();
+      });
+    });
+  }
+
+  function discardDraftFiltersAndClose() {
+    state.draftFilters = cloneFilters(state.appliedFilters);
+    closeUnsavedConfirmModal();
+    closeFilterDrawerImmediate();
+  }
+
+  // =========================================================================
+  // 10. Unsaved Changes Confirmation Modal
+  // =========================================================================
+  function openUnsavedConfirmModal() {
+    state.isUnsavedModalOpen = true;
+    dom.unsavedModalBackdrop.classList.remove('hidden');
+    dom.unsavedConfirmModal.classList.remove('hidden');
+    syncBodyScrollLock();
+    dom.unsavedApplyBtn.focus();
+  }
+
+  function closeUnsavedConfirmModal() {
+    state.isUnsavedModalOpen = false;
+    dom.unsavedModalBackdrop.classList.add('hidden');
+    dom.unsavedConfirmModal.classList.add('hidden');
+    syncBodyScrollLock();
+    if (state.isDrawerOpen) {
+      dom.closeFilterDrawerBtn.focus();
+    }
+  }
+
+  // =========================================================================
+  // 11. Active Filter Summary Tags (Outside Drawer)
+  // =========================================================================
+  function renderActiveFilterSummary() {
+    const f = state.appliedFilters;
+    const tags = [];
+
+    if (f.dept) {
+      tags.push({
+        label: `学科: ${f.dept}`,
+        onRemove: () => {
+          state.appliedFilters.dept = '';
+        }
+      });
+    }
+    if (f.campus) {
+      tags.push({
+        label: `校舎: ${f.campus}`,
+        onRemove: () => {
+          state.appliedFilters.campus = '';
+        }
+      });
+    }
+    f.examDates.forEach((d) => {
+      tags.push({
+        label: `試験日: ${d}`,
+        onRemove: () => {
+          state.appliedFilters.examDates.delete(d);
+        }
+      });
+    });
+    f.regDays.forEach((day) => {
+      tags.push({
+        label: `曜日: ${day}曜`,
+        onRemove: () => {
+          state.appliedFilters.regDays.delete(day);
+        }
+      });
+    });
+    f.regPeriods.forEach((p) => {
+      tags.push({
+        label: `時限: ${p}時限`,
+        onRemove: () => {
+          state.appliedFilters.regPeriods.delete(p);
+        }
+      });
+    });
+    if (f.status) {
+      tags.push({
+        label: `追評価: ${f.status}`,
+        onRemove: () => {
+          state.appliedFilters.status = '';
+        }
+      });
+    }
+
+    if (tags.length > 0) {
+      dom.activeFilterBadge.textContent = String(tags.length);
+      dom.activeFilterBadge.classList.remove('hidden');
+      dom.activeFiltersBar.classList.remove('hidden');
+    } else {
+      dom.activeFilterBadge.classList.add('hidden');
+      dom.activeFiltersBar.classList.add('hidden');
+    }
+
+    dom.activeFilterTags.innerHTML = '';
+    tags.forEach((tag) => {
+      const span = document.createElement('span');
+      span.className = 'active-tag';
+      span.textContent = tag.label;
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'active-tag-remove';
+      btn.setAttribute('aria-label', `${tag.label} を解除`);
+      btn.textContent = '×';
+      btn.addEventListener('click', () => {
+        tag.onRemove();
+        beginSkeletonLoading();
+        requestAnimationFrame(() => {
+          renderCurrentView();
+          requestAnimationFrame(() => {
+            endSkeletonLoading();
+          });
+        });
+      });
+
+      span.appendChild(btn);
+      dom.activeFilterTags.appendChild(span);
+    });
+  }
+
+  // =========================================================================
+  // 12. Filtering & Sorting Pipeline
   // =========================================================================
   function getFilteredAndSortedRecords() {
-    const qNorm = normalizeText(state.filters.query);
+    const f = state.appliedFilters;
+    const qNorm = normalizeText(f.query);
 
     const filtered = state.records.filter((rec) => {
       if (state.viewMode === 'pinned' && !state.pinnedKeys.has(rec.stableKey)) {
         return false;
       }
-      if (state.filters.dept && rec.department !== state.filters.dept) {
+      if (f.dept && rec.department !== f.dept) {
         return false;
       }
-      if (state.filters.campus && rec.campus !== state.filters.campus) {
+      if (f.campus && rec.campus !== f.campus) {
         return false;
       }
-      if (state.filters.examDate && rec.examDateLabel !== state.filters.examDate) {
+      if (f.examDates.size > 0 && !f.examDates.has(rec.examDateLabel)) {
         return false;
       }
-      if (state.filters.regDay && rec.regularDay !== state.filters.regDay) {
+      if (f.regDays.size > 0 && !f.regDays.has(rec.regularDay)) {
         return false;
       }
-      if (state.filters.regPeriod && rec.regularPeriod !== state.filters.regPeriod) {
+      if (f.regPeriods.size > 0 && !f.regPeriods.has(rec.regularPeriod)) {
         return false;
       }
-      if (state.filters.status && rec.status !== state.filters.status) {
+      if (f.status && rec.status !== f.status) {
         return false;
       }
       if (qNorm && !rec.searchBlob.includes(qNorm)) {
@@ -739,23 +1068,11 @@
         case 'dept':
           cmp = a.department.localeCompare(b.department, 'ja') || a.classCode.localeCompare(b.classCode, 'ja');
           break;
-        case 'code':
-          cmp = a.classCode.localeCompare(b.classCode, 'ja');
-          break;
         case 'regular':
           cmp = a.regularSortKey - b.regularSortKey;
           break;
-        case 'instructor':
-          cmp = a.instructor.localeCompare(b.instructor, 'ja');
-          break;
-        case 'campus':
-          cmp = a.campus.localeCompare(b.campus, 'ja');
-          break;
         case 'room':
           cmp = a.room.localeCompare(b.room, 'ja', { numeric: true });
-          break;
-        case 'status':
-          cmp = a.status.localeCompare(b.status, 'ja');
           break;
         case 'no':
         default:
@@ -772,15 +1089,204 @@
   }
 
   // =========================================================================
-  // 8. Rendering
+  // 13. Rendering Cards, Date Groups & Print Table
   // =========================================================================
   function escapeHtml(str) {
     return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+  }
+
+  function createStarSvg(filled) {
+    return filled
+        ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`
+        : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`;
+  }
+
+  function createExamCardElement(rec) {
+    const isPinned = state.pinnedKeys.has(rec.stableKey);
+    const isMakeupCancelled = rec.status === '実施しない';
+    const isConflict = state.conflictUids.has(rec.uid);
+
+    const card = document.createElement('article');
+    card.className = 'exam-card';
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', `${rec.subject} の詳細を表示`);
+
+    if (isPinned) card.classList.add('card-pinned');
+    if (isMakeupCancelled) card.classList.add('card-cancelled');
+    if (isConflict) card.classList.add('card-conflict');
+
+    const scheduleDisplay = rec.examRaw || '試験日時未定・記載なし';
+    const roomLocationDisplay =
+        rec.campus && rec.room
+            ? `${rec.campus} / ${rec.room}`
+            : rec.room || rec.campus || '未定・記載なし';
+
+    const makeupStatusTag = isMakeupCancelled
+        ? `<span class="card-status-note">追評価: 実施しない</span>`
+        : '';
+
+    const conflictHtml = isConflict
+        ? `<div class="card-conflict-notice" role="status">
+           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+             <line x1="12" y1="9" x2="12" y2="13"></line>
+             <line x1="12" y1="17" x2="12.01" y2="17"></line>
+           </svg>
+           <span>試験日時が他の登録科目と重複しています</span>
+         </div>`
+        : '';
+
+    card.innerHTML = `
+      <div class="card-header-row">
+        <div class="card-datetime-block">
+          <span class="card-datetime">${escapeHtml(scheduleDisplay)}</span>
+          ${makeupStatusTag}
+        </div>
+        <button
+          type="button"
+          class="pin-btn ${isPinned ? 'pinned' : ''}"
+          data-key="${escapeHtml(rec.stableKey)}"
+          aria-pressed="${isPinned ? 'true' : 'false'}"
+          aria-label="${isPinned ? 'マイ試験日程から解除' : 'マイ試験日程に登録'}"
+          title="${isPinned ? 'マイ試験日程から解除' : 'マイ試験日程に登録'}"
+        >
+          ${createStarSvg(isPinned)}
+        </button>
+      </div>
+
+      <h3 class="card-subject">${escapeHtml(rec.subject || '科目名未記載')}</h3>
+
+      ${conflictHtml}
+
+      <div class="card-details-list">
+        <div class="card-detail-row">
+          <span class="card-detail-label">試験教室:</span>
+          <span class="card-detail-value">${escapeHtml(roomLocationDisplay)}</span>
+        </div>
+        <div class="card-detail-row">
+          <span class="card-detail-label">担当教員:</span>
+          <span class="card-detail-teacher">${escapeHtml(rec.instructor || '未記載')}</span>
+        </div>
+      </div>
+    `;
+
+    // Star button click (prevent opening detail modal)
+    const pinBtn = card.querySelector('.pin-btn');
+    pinBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      togglePin(rec.stableKey);
+    });
+
+    // Card click or Enter/Space opens Subject Detail Modal
+    card.addEventListener('click', () => {
+      openDetailModal(rec, card);
+    });
+
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openDetailModal(rec, card);
+      }
+    });
+
+    return card;
+  }
+
+  function renderCards(records) {
+    dom.cardListContainer.innerHTML = '';
+
+    if (records.length === 0) {
+      dom.emptyState.classList.remove('hidden');
+      if (state.records.length === 0) {
+        dom.emptyTitle.textContent = 'データがありません';
+        dom.emptyDesc.textContent = '上部のエリアからExcelファイルを読み込むか、「サンプル読込」を押してください。';
+      } else if (state.viewMode === 'pinned') {
+        dom.emptyTitle.textContent = 'マイ試験日程に登録された科目がありません';
+        dom.emptyDesc.textContent = '「全科目」タブで履修している科目の星アイコンを押すと登録できます。';
+      } else {
+        dom.emptyTitle.textContent = '条件に一致する試験が見つかりませんでした';
+        dom.emptyDesc.textContent = '検索キーワードや絞り込み条件を変更してみてください。';
+      }
+      return;
+    }
+
+    dom.emptyState.classList.add('hidden');
+    const isDateSorted = state.sortBy === 'examDate_asc' || state.sortBy === 'examDate_desc';
+
+    if (isDateSorted) {
+      const groups = new Map();
+      records.forEach((rec) => {
+        const groupKey = rec.examDateLabel;
+        if (!groups.has(groupKey)) groups.set(groupKey, []);
+        groups.get(groupKey).push(rec);
+      });
+
+      const fragment = document.createDocumentFragment();
+
+      groups.forEach((groupRecords, dateLabel) => {
+        const section = document.createElement('section');
+        section.className = 'date-group-section';
+
+        const header = document.createElement('div');
+        header.className = 'date-group-header';
+        header.innerHTML = `
+          <h2 class="date-group-title">${escapeHtml(dateLabel)}</h2>
+          <span class="date-group-count">${groupRecords.length} 件</span>
+        `;
+
+        const grid = document.createElement('div');
+        grid.className = 'card-grid';
+        groupRecords.forEach((rec) => {
+          grid.appendChild(createExamCardElement(rec));
+        });
+
+        section.appendChild(header);
+        section.appendChild(grid);
+        fragment.appendChild(section);
+      });
+
+      dom.cardListContainer.appendChild(fragment);
+    } else {
+      const grid = document.createElement('div');
+      grid.className = 'card-grid';
+      records.forEach((rec) => {
+        grid.appendChild(createExamCardElement(rec));
+      });
+      dom.cardListContainer.appendChild(grid);
+    }
+  }
+
+  function renderPrintTable(records) {
+    dom.printTableBody.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+
+    records.forEach((rec) => {
+      const isPinned = state.pinnedKeys.has(rec.stableKey);
+      const tr = document.createElement('tr');
+      if (isPinned) tr.classList.add('row-pinned');
+
+      tr.innerHTML = `
+        <td>${escapeHtml(rec.no)}</td>
+        <td>${escapeHtml(rec.department)}</td>
+        <td>${escapeHtml(rec.classCode)}</td>
+        <td>${escapeHtml(rec.regularDisplay)}</td>
+        <td>${escapeHtml(rec.subject)}</td>
+        <td>${escapeHtml(rec.instructor)}</td>
+        <td>${escapeHtml(rec.campus)}</td>
+        <td>${escapeHtml(rec.examRaw || '-')}</td>
+        <td>${escapeHtml(rec.room || '-')}</td>
+        <td>${escapeHtml(rec.status)}</td>
+      `;
+      fragment.appendChild(tr);
+    });
+
+    dom.printTableBody.appendChild(fragment);
   }
 
   function updateHeaderAndCounts() {
@@ -790,234 +1296,143 @@
       dom.dbMetaText.textContent = 'Excelファイルを読み込んでデータベース化します（ブラウザ内ローカル保存）';
     }
 
-    dom.countAll.textContent = state.records.length;
+    dom.countAll.textContent = String(state.records.length);
     const activePinnedCount = state.records.filter((r) => state.pinnedKeys.has(r.stableKey)).length;
-    dom.countPinned.textContent = activePinnedCount;
-  }
-
-  function updateSortHeaderIndicators() {
-    const [field, dir] = state.sortBy.split('_');
-    dom.sortableHeaders.forEach((th) => {
-      th.classList.remove('sort-asc', 'sort-desc');
-      if (th.dataset.sort === field) {
-        th.classList.add(dir === 'desc' ? 'sort-desc' : 'sort-asc');
-      }
-    });
-  }
-
-  function renderTableAndCards(records) {
-    dom.tableBody.innerHTML = '';
-    dom.mobileCardList.innerHTML = '';
-
-    if (records.length === 0) {
-      dom.emptyState.classList.remove('hidden');
-      if (state.records.length === 0) {
-        dom.emptyTitle.textContent = 'データベースにデータがありません';
-        dom.emptyDesc.textContent = '上部のエリアからExcelファイルを読み込むか、「サンプル読込」を押してください。';
-      } else if (state.viewMode === 'pinned') {
-        dom.emptyTitle.textContent = 'マイ試験日程に登録された科目がありません';
-        dom.emptyDesc.textContent = '「全科目一覧」タブで履修している科目の「☆」をタップすると登録できます。';
-      } else {
-        dom.emptyTitle.textContent = '条件に一致する試験が見つかりませんでした';
-        dom.emptyDesc.textContent = '検索キーワードや絞り込み条件を変更してみてください。';
-      }
-      return;
-    }
-
-    dom.emptyState.classList.add('hidden');
-    const tableFrag = document.createDocumentFragment();
-    const cardFrag = document.createDocumentFragment();
-
-    records.forEach((rec) => {
-      const isPinned = state.pinnedKeys.has(rec.stableKey);
-      const isCancelled = rec.status === '実施しない';
-      const isConflict = state.conflictUids.has(rec.uid);
-
-      const roomsHtml =
-        rec.roomsList.length > 0
-          ? rec.roomsList.map((rm) => `<span class="room-chip">${escapeHtml(rm)}</span>`).join('')
-          : '<span class="text-muted">-</span>';
-
-      const statusClass = isCancelled ? 'status-inactive' : 'status-active';
-
-      // 1. Desktop Table Row
-      const tr = document.createElement('tr');
-      if (isPinned) tr.classList.add('row-pinned');
-      if (isCancelled) tr.classList.add('row-cancelled');
-      if (isConflict) tr.classList.add('row-conflict');
-
-      tr.innerHTML = `
-        <td class="col-pin no-print">
-          <button type="button" class="pin-btn ${isPinned ? 'pinned' : ''}" data-key="${escapeHtml(rec.stableKey)}" title="${isPinned ? 'マイ日程から解除' : 'マイ日程に登録'}">
-            ${isPinned ? '★' : '☆'}
-          </button>
-        </td>
-        <td class="col-no">${escapeHtml(rec.no)}</td>
-        <td class="col-dept"><span class="dept-pill">${escapeHtml(rec.department)}</span></td>
-        <td class="col-code">${escapeHtml(rec.classCode)}</td>
-        <td class="col-reg">${escapeHtml(rec.regularDisplay)}</td>
-        <td class="col-subject">${escapeHtml(rec.subject)}</td>
-        <td class="col-teacher">${escapeHtml(rec.instructor)}</td>
-        <td class="col-campus">${escapeHtml(rec.campus)}</td>
-        <td class="col-exam">${escapeHtml(rec.examRaw || '-')}</td>
-        <td class="col-room">${roomsHtml}</td>
-        <td class="col-status"><span class="status-badge ${statusClass}">${escapeHtml(rec.status)}</span></td>
-      `;
-      tableFrag.appendChild(tr);
-
-      // 2. Smartphone Mode Card
-      const card = document.createElement('article');
-      card.className = 'exam-card';
-      if (isPinned) card.classList.add('row-pinned');
-      if (isCancelled) card.classList.add('row-cancelled');
-      if (isConflict) card.classList.add('row-conflict');
-
-      const conflictHtml = isConflict
-        ? `<div class="exam-card-conflict-tag">⚠️ 試験日時が他の登録科目と重複しています</div>`
-        : '';
-
-      card.innerHTML = `
-        <div class="exam-card-top">
-          <div class="exam-card-schedule">
-            <span class="exam-card-datetime">${escapeHtml(rec.examRaw || '日時未定')}</span>
-            ${rec.roomsList.length > 0 ? roomsHtml : ''}
-          </div>
-          <div class="exam-card-actions">
-            <span class="status-badge ${statusClass}">${escapeHtml(rec.status)}</span>
-            <button type="button" class="pin-btn ${isPinned ? 'pinned' : ''}" data-key="${escapeHtml(rec.stableKey)}" aria-label="${isPinned ? 'マイ日程から解除' : 'マイ日程に登録'}">
-              ${isPinned ? '★' : '☆'}
-            </button>
-          </div>
-        </div>
-        <h3 class="exam-card-subject">${escapeHtml(rec.subject)}</h3>
-        ${conflictHtml}
-        <div class="exam-card-meta">
-          <span class="dept-pill">${escapeHtml(rec.department)}</span>
-          <span class="exam-card-code">${escapeHtml(rec.classCode)}</span>
-          <span class="exam-card-meta-item">通常: ${escapeHtml(rec.regularDisplay)}</span>
-          <span class="exam-card-meta-item">担当: ${escapeHtml(rec.instructor)}</span>
-          <span class="exam-card-meta-item">${escapeHtml(rec.campus)}</span>
-          <span class="exam-card-no">No.${escapeHtml(rec.no)}</span>
-        </div>
-      `;
-      cardFrag.appendChild(card);
-    });
-
-    dom.tableBody.appendChild(tableFrag);
-    dom.mobileCardList.appendChild(cardFrag);
-  }
-
-  function renderTimeline(records) {
-    dom.timelineView.innerHTML = '';
-
-    if (records.length === 0) {
-      dom.timelineView.innerHTML = `
-        <div class="table-card">
-          <div class="empty-state">
-            <p class="empty-title">表示する試験日程がありません</p>
-            <p class="empty-desc">データを読み込むか、絞り込み条件を解除してください。</p>
-          </div>
-        </div>
-      `;
-      return;
-    }
-
-    const sorted = [...records].sort((a, b) => a.examSortKey - b.examSortKey || a.noSort - b.noSort);
-    const groups = new Map();
-
-    sorted.forEach((rec) => {
-      const key = rec.examDateLabel;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(rec);
-    });
-
-    const fragment = document.createDocumentFragment();
-
-    groups.forEach((items, dateLabel) => {
-      const card = document.createElement('article');
-      card.className = 'timeline-day-card';
-
-      const itemsHtml = items
-        .map((rec) => {
-          const isPinned = state.pinnedKeys.has(rec.stableKey);
-          const isCancelled = rec.status === '実施しない';
-          const roomsHtml = rec.roomsList
-            .map((rm) => `<span class="room-chip">${escapeHtml(rm)}</span>`)
-            .join('');
-          const statusClass = isCancelled ? 'status-inactive' : 'status-active';
-
-          return `
-            <div class="timeline-item ${isPinned ? 'row-pinned' : ''} ${isCancelled ? 'row-cancelled' : ''}">
-              <button type="button" class="pin-btn no-print ${isPinned ? 'pinned' : ''}" data-key="${escapeHtml(rec.stableKey)}">
-                ${isPinned ? '★' : '☆'}
-              </button>
-              <div class="timeline-period">${escapeHtml(rec.examPeriodLabel || '時限未定')}</div>
-              <div class="timeline-main">
-                <div class="timeline-subject">${escapeHtml(rec.subject)}</div>
-                <div class="timeline-submeta">
-                  ${escapeHtml(rec.department)} / ${escapeHtml(rec.classCode)} ・ 担当: ${escapeHtml(rec.instructor)}（通常: ${escapeHtml(rec.regularDisplay)}）
-                </div>
-              </div>
-              <div class="timeline-right">
-                <span class="dept-pill">${escapeHtml(rec.campus)}</span>
-                ${roomsHtml}
-                <span class="status-badge ${statusClass}">${escapeHtml(rec.status)}</span>
-              </div>
-            </div>
-          `;
-        })
-        .join('');
-
-      card.innerHTML = `
-        <div class="timeline-day-header">
-          <h3 class="timeline-day-title">${escapeHtml(dateLabel)}</h3>
-          <span class="timeline-day-count">${items.length} 科目</span>
-        </div>
-        <div class="timeline-list">${itemsHtml}</div>
-      `;
-
-      fragment.appendChild(card);
-    });
-
-    dom.timelineView.appendChild(fragment);
+    dom.countPinned.textContent = String(activePinnedCount);
   }
 
   function renderCurrentView() {
     const filtered = getFilteredAndSortedRecords();
     dom.resultStats.innerHTML = `表示件数: <strong>${filtered.length}</strong> / 全 ${state.records.length} 件`;
-    updateActiveFilterBadge();
+
+    renderActiveFilterSummary();
 
     const modeLabel =
-      state.viewMode === 'pinned'
-        ? 'マイ定期試験日程表'
-        : state.viewMode === 'timeline'
-        ? '定期試験日程（日別タイムライン）'
-        : '定期試験日程一覧';
+        state.viewMode === 'pinned' ? 'マイ定期試験日程表' : '定期試験日程一覧';
     dom.printTitle.textContent = modeLabel;
     dom.printMeta.textContent = `出力日時: ${new Date().toLocaleString('ja-JP')} ／ 表示件数: ${filtered.length}件`;
 
-    updateSortHeaderIndicators();
-
-    if (state.viewMode === 'timeline') {
-      dom.tableView.classList.add('hidden');
-      dom.timelineView.classList.remove('hidden');
-      renderTimeline(filtered);
-    } else {
-      dom.timelineView.classList.add('hidden');
-      dom.tableView.classList.remove('hidden');
-      renderTableAndCards(filtered);
-    }
+    renderCards(filtered);
+    renderPrintTable(filtered);
   }
 
   function refreshAllUI() {
-    populateFilterDropdowns();
+    buildAvailableFilterOptions();
     detectPinnedConflicts();
     updateHeaderAndCounts();
     renderCurrentView();
   }
 
   // =========================================================================
-  // 9. Pinning & ICS Calendar Export
+  // 14. Subject Detail Modal (All 10 Record Fields)
+  // =========================================================================
+  function syncDetailModalPinButton() {
+    const rec = state.activeDetailRecord;
+    if (!rec) return;
+    const isPinned = state.pinnedKeys.has(rec.stableKey);
+    dom.detailModalPinBtn.textContent = isPinned
+        ? 'マイ試験日程に登録済み（解除する）'
+        : 'マイ試験日程に登録する';
+    dom.detailModalPinBtn.className = isPinned ? 'btn btn-ghost' : 'btn btn-secondary';
+  }
+
+  function openDetailModal(rec, triggerEl) {
+    state.activeDetailRecord = rec;
+    state.lastFocusedElement = triggerEl || document.activeElement;
+
+    dom.detailModalTitle.textContent = rec.subject || '科目名未記載';
+
+    const isMakeupActive = rec.status !== '実施しない';
+    const statusBadgeClass = isMakeupActive ? 'status-pill-active' : 'status-pill-inactive';
+
+    const detailItems = [
+      {
+        label: '追評価の実施有無',
+        html: `<span class="status-pill-inline ${statusBadgeClass}">${escapeHtml(rec.status || '未記載')}</span>`
+      },
+      {
+        label: '理解度確認テスト日程',
+        value: rec.examRaw || '未定・記載なし'
+      },
+      {
+        label: '校舎',
+        value: rec.campus || '未記載'
+      },
+      {
+        label: '理解度確認テスト実施教室',
+        value: rec.room || '未定・記載なし'
+      },
+      {
+        label: '担当教員',
+        value: rec.instructor || '未記載'
+      },
+      {
+        label: '学科・区分',
+        value: rec.department || '未記載'
+      },
+      {
+        label: '時間割コード',
+        value: rec.classCode || '未記載'
+      },
+      {
+        label: '通常授業の曜日・時限',
+        value: rec.regularDisplay || '未記載'
+      },
+      {
+        label: '通し番号（No.）',
+        value: rec.no !== '' && rec.no !== null && rec.no !== undefined ? String(rec.no) : '未記載'
+      }
+    ];
+
+    const dl = document.createElement('dl');
+    dl.className = 'detail-dl';
+
+    detailItems.forEach((item) => {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'detail-item';
+
+      const dt = document.createElement('dt');
+      dt.className = 'detail-dt';
+      dt.textContent = item.label;
+
+      const dd = document.createElement('dd');
+      dd.className = 'detail-dd';
+      if (item.html) {
+        dd.innerHTML = item.html;
+      } else {
+        dd.textContent = item.value;
+      }
+
+      wrapper.appendChild(dt);
+      wrapper.appendChild(dd);
+      dl.appendChild(wrapper);
+    });
+
+    dom.detailModalBody.innerHTML = '';
+    dom.detailModalBody.appendChild(dl);
+
+    syncDetailModalPinButton();
+
+    dom.detailModalBackdrop.classList.remove('hidden');
+    dom.detailModal.classList.remove('hidden');
+    syncBodyScrollLock();
+
+    dom.closeDetailModalBtn.focus();
+  }
+
+  function closeDetailModal() {
+    state.activeDetailRecord = null;
+    dom.detailModalBackdrop.classList.add('hidden');
+    dom.detailModal.classList.add('hidden');
+    syncBodyScrollLock();
+
+    if (state.lastFocusedElement && typeof state.lastFocusedElement.focus === 'function') {
+      state.lastFocusedElement.focus();
+    }
+  }
+
+  // =========================================================================
+  // 15. Pinning & ICS Calendar Export
   // =========================================================================
   async function togglePin(stableKey) {
     if (!stableKey) return;
@@ -1029,16 +1444,17 @@
     await StorageService.set('pinnedKeys', [...state.pinnedKeys]);
     detectPinnedConflicts();
     updateHeaderAndCounts();
+    syncDetailModalPinButton();
     renderCurrentView();
   }
 
   function exportPinnedToICS() {
     const pinned = state.records.filter(
-      (r) => state.pinnedKeys.has(r.stableKey) && r.examMonth !== null && r.examDay !== null
+        (r) => state.pinnedKeys.has(r.stableKey) && r.examMonth !== null && r.examDay !== null
     );
 
     if (pinned.length === 0) {
-      showToast('書き出し可能な「★マイ試験日程」がありません');
+      showToast('書き出し可能な「マイ試験日程」がありません');
       return;
     }
 
@@ -1081,7 +1497,7 @@
       lines.push(`DTEND:${year}${mm}${dd}T${endTime}`);
       lines.push(`SUMMARY:【試験】${rec.subject} (${rec.examPeriodLabel})`);
       lines.push(`LOCATION:${rec.campus} ${rec.room}`);
-      lines.push(`DESCRIPTION:クラス: ${rec.classCode} / 担当: ${rec.instructor} / 状態: ${rec.status}`);
+      lines.push(`DESCRIPTION:時間割コード: ${rec.classCode} / 担当教員: ${rec.instructor} / 追評価: ${rec.status}`);
       lines.push('END:VEVENT');
     });
 
@@ -1098,7 +1514,7 @@
   }
 
   // =========================================================================
-  // 10. Event Listeners
+  // 16. Event Listeners
   // =========================================================================
   function extractDroppedFile(dataTransfer) {
     if (!dataTransfer) return null;
@@ -1117,25 +1533,6 @@
 
   function bindEvents() {
     dom.closeErrorBtn.addEventListener('click', hideError);
-
-    // Smartphone Mode Toggle
-    dom.mobileModeBtn.addEventListener('click', () => {
-      const nextMode = !state.mobileMode;
-      state.mobileModeManual = true;
-      localStorage.setItem(MOBILE_PREF_KEY, nextMode ? 'on' : 'off');
-      applyMobileMode(nextMode);
-      showToast(
-        nextMode
-          ? 'スマホモードをONにしました（カード表示）'
-          : 'スマホモードをOFFにしました（PC一覧表示）'
-      );
-    });
-
-    // Collapsible Mobile Filters Drawer
-    dom.toggleMobileFiltersBtn.addEventListener('click', () => {
-      state.mobileFiltersOpen = !state.mobileFiltersOpen;
-      syncMobileFilterDrawer();
-    });
 
     // Upload panel toggle
     dom.toggleUploadBtn.addEventListener('click', () => {
@@ -1212,7 +1609,7 @@
     dom.loadSampleBtn.addEventListener('click', loadSampleDataset);
     dom.printBtn.addEventListener('click', () => window.print());
 
-    // View mode tabs
+    // Two View Tabs (全科目 / マイ試験日程)
     dom.tabButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
         dom.tabButtons.forEach((b) => {
@@ -1226,90 +1623,136 @@
       });
     });
 
-    // Search input (debounced)
+    // Search input with real-time debounce & skeleton state
     let searchDebounce = null;
+    let isSearchDebouncing = false;
     dom.searchInput.addEventListener('input', (e) => {
       const val = e.target.value;
       dom.clearSearchBtn.classList.toggle('hidden', val.length === 0);
+
+      if (!isSearchDebouncing) {
+        isSearchDebouncing = true;
+        beginSkeletonLoading();
+      }
+
       clearTimeout(searchDebounce);
       searchDebounce = setTimeout(() => {
-        state.filters.query = val;
+        state.appliedFilters.query = val;
         renderCurrentView();
-      }, 120);
+        requestAnimationFrame(() => {
+          isSearchDebouncing = false;
+          endSkeletonLoading();
+        });
+      }, 160);
     });
 
     dom.clearSearchBtn.addEventListener('click', () => {
+      clearTimeout(searchDebounce);
+      if (isSearchDebouncing) {
+        isSearchDebouncing = false;
+        endSkeletonLoading();
+      }
       dom.searchInput.value = '';
       dom.clearSearchBtn.classList.add('hidden');
-      state.filters.query = '';
+      state.appliedFilters.query = '';
       renderCurrentView();
       dom.searchInput.focus();
     });
 
-    // Dropdown filters
-    const filterBindings = [
-      [dom.filterDept, 'dept'],
-      [dom.filterCampus, 'campus'],
-      [dom.filterExamDate, 'examDate'],
-      [dom.filterRegDay, 'regDay'],
-      [dom.filterRegPeriod, 'regPeriod'],
-      [dom.filterStatus, 'status']
-    ];
+    // Quick Clear All Filter Chips/Dropdowns outside drawer
+    dom.quickClearAllFiltersBtn.addEventListener('click', () => {
+      const currentQuery = state.appliedFilters.query;
+      state.appliedFilters = createEmptyFilters();
+      state.appliedFilters.query = currentQuery;
 
-    filterBindings.forEach(([el, key]) => {
-      el.addEventListener('change', () => {
-        state.filters[key] = el.value;
+      beginSkeletonLoading();
+      requestAnimationFrame(() => {
         renderCurrentView();
+        requestAnimationFrame(() => {
+          endSkeletonLoading();
+        });
       });
+      showToast('絞り込み条件をすべて解除しました');
     });
 
-    // Reset filters
-    dom.resetFiltersBtn.addEventListener('click', () => {
-      state.filters = {
-        query: '',
-        dept: '',
-        campus: '',
-        examDate: '',
-        regDay: '',
-        regPeriod: '',
-        status: ''
-      };
-      dom.searchInput.value = '';
-      dom.clearSearchBtn.classList.add('hidden');
-      dom.filterDept.value = '';
-      dom.filterCampus.value = '';
-      dom.filterExamDate.value = '';
-      dom.filterRegDay.value = '';
-      dom.filterRegPeriod.value = '';
-      dom.filterStatus.value = '';
-      renderCurrentView();
-      showToast('絞り込み条件をリセットしました');
-    });
-
-    // Sort select & Table column headers
+    // Sort select
     dom.sortSelect.addEventListener('change', () => {
       state.sortBy = dom.sortSelect.value;
       renderCurrentView();
     });
 
-    dom.sortableHeaders.forEach((th) => {
-      th.addEventListener('click', () => {
-        const field = th.dataset.sort;
-        const [curField, curDir] = state.sortBy.split('_');
-        const nextDir = curField === field && curDir === 'asc' ? 'desc' : 'asc';
-        state.sortBy = `${field}_${nextDir}`;
-        if ([...dom.sortSelect.options].some((o) => o.value === state.sortBy)) {
-          dom.sortSelect.value = state.sortBy;
-        }
-        renderCurrentView();
+    // Filter Drawer Controls
+    dom.openFilterDrawerBtn.addEventListener('click', openFilterDrawer);
+    dom.closeFilterDrawerBtn.addEventListener('click', requestCloseFilterDrawer);
+    dom.filterDrawerBackdrop.addEventListener('click', requestCloseFilterDrawer);
+
+    dom.drawerFilterDept.addEventListener('change', () => {
+      state.draftFilters.dept = dom.drawerFilterDept.value;
+    });
+
+    dom.drawerStatusSegments.querySelectorAll('.segment-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.draftFilters.status = btn.dataset.value || '';
+        renderDrawerControls();
       });
     });
 
-    // Event delegation for Pin buttons
-    document.addEventListener('click', (e) => {
-      const pinBtn = e.target.closest('.pin-btn');
-      if (pinBtn) {
-        togglePin(pinBtn.dataset.key);
+    dom.drawerResetBtn.addEventListener('click', () => {
+      const keepQuery = state.draftFilters.query;
+      state.draftFilters = createEmptyFilters();
+      state.draftFilters.query = keepQuery;
+      renderDrawerControls();
+    });
+
+    dom.drawerApplyBtn.addEventListener('click', applyDraftFiltersAndClose);
+
+    // Unsaved Changes Confirmation Modal Actions
+    dom.unsavedApplyBtn.addEventListener('click', applyDraftFiltersAndClose);
+    dom.unsavedDiscardBtn.addEventListener('click', discardDraftFiltersAndClose);
+    dom.unsavedModalBackdrop.addEventListener('click', closeUnsavedConfirmModal);
+
+    // Subject Detail Modal Actions
+    dom.closeDetailModalBtn.addEventListener('click', closeDetailModal);
+    dom.detailModalCloseFooterBtn.addEventListener('click', closeDetailModal);
+    dom.detailModalBackdrop.addEventListener('click', closeDetailModal);
+    dom.detailModalPinBtn.addEventListener('click', () => {
+      if (state.activeDetailRecord) {
+        togglePin(state.activeDetailRecord.stableKey);
+      }
+    });
+
+    // Global Keyboard Navigation (Esc & Focus Traps)
+    document.addEventListener('keydown', (e) => {
+      // Priority 1: Unsaved Confirmation Modal
+      if (state.isUnsavedModalOpen) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          closeUnsavedConfirmModal();
+        } else {
+          handleContainerTabTrap(e, dom.unsavedConfirmModal);
+        }
+        return;
+      }
+
+      // Priority 2: Subject Detail Modal
+      if (state.activeDetailRecord) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          closeDetailModal();
+        } else {
+          handleContainerTabTrap(e, dom.detailModal);
+        }
+        return;
+      }
+
+      // Priority 3: Left Filter Drawer
+      if (state.isDrawerOpen) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          requestCloseFilterDrawer();
+        } else {
+          handleContainerTabTrap(e, dom.filterDrawer);
+        }
       }
     });
 
@@ -1322,8 +1765,9 @@
       await StorageService.set('pinnedKeys', []);
       detectPinnedConflicts();
       updateHeaderAndCounts();
+      syncDetailModalPinButton();
       renderCurrentView();
-      showToast('マイ試験日程の選択をすべて解除しました');
+      showToast('マイ試験日程の登録をすべて解除しました');
     });
 
     dom.resetDbBtn.addEventListener('click', async () => {
@@ -1332,6 +1776,10 @@
       state.records = [];
       state.meta = null;
       state.pinnedKeys.clear();
+      state.appliedFilters = createEmptyFilters();
+      state.draftFilters = createEmptyFilters();
+      dom.searchInput.value = '';
+      dom.clearSearchBtn.classList.add('hidden');
       dom.uploadPanel.classList.remove('hidden');
       refreshAllUI();
       showToast('データベースを初期化しました');
@@ -1339,31 +1787,46 @@
   }
 
   // =========================================================================
-  // 11. Initialization
+  // 17. Initialization
   // =========================================================================
   async function init() {
-    initMobileMode();
     bindEvents();
 
-    const [savedRecords, savedMeta, savedPins] = await Promise.all([
-      StorageService.get('records'),
-      StorageService.get('meta'),
-      StorageService.get('pinnedKeys')
-    ]);
+    // Show skeleton only if IndexedDB restoration takes longer than initial paint
+    let initLoaded = false;
+    const slowStorageTimer = setTimeout(() => {
+      if (!initLoaded) {
+        beginSkeletonLoading();
+      }
+    }, 120);
 
-    if (Array.isArray(savedPins)) {
-      state.pinnedKeys = new Set(savedPins);
+    try {
+      const [savedRecords, savedMeta, savedPins] = await Promise.all([
+        StorageService.get('records'),
+        StorageService.get('meta'),
+        StorageService.get('pinnedKeys')
+      ]);
+
+      if (Array.isArray(savedPins)) {
+        state.pinnedKeys = new Set(savedPins);
+      }
+
+      if (Array.isArray(savedRecords) && savedRecords.length > 0) {
+        state.records = savedRecords;
+        state.meta = savedMeta;
+        dom.uploadPanel.classList.add('hidden');
+      } else {
+        dom.uploadPanel.classList.remove('hidden');
+      }
+    } finally {
+      const skeletonWasShown = !initLoaded && activeLoadingTokens > 0;
+      initLoaded = true;
+      clearTimeout(slowStorageTimer);
+      refreshAllUI();
+      if (skeletonWasShown) {
+        endSkeletonLoading();
+      }
     }
-
-    if (Array.isArray(savedRecords) && savedRecords.length > 0) {
-      state.records = savedRecords;
-      state.meta = savedMeta;
-      dom.uploadPanel.classList.add('hidden');
-    } else {
-      dom.uploadPanel.classList.remove('hidden');
-    }
-
-    refreshAllUI();
   }
 
   if (document.readyState === 'loading') {

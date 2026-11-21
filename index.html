@@ -3,301 +3,462 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>定期試験日程 検索・管理データベース</title>
+  <title>定期試験日程データベース</title>
   <link rel="stylesheet" href="style.css" />
   <!-- SheetJS (xlsx) with multi-CDN fallback for reliable local Excel parsing -->
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
 </head>
 <body>
-  <div class="app-shell">
-    <!-- Full-window Drag Overlay -->
-    <div class="global-drop-overlay hidden" id="globalDropOverlay" aria-hidden="true">
-      <div class="global-drop-box">
-        <p class="global-drop-title">ここにExcelファイルをドロップして読み込み</p>
-        <p class="global-drop-sub">.xlsx / .xls / .csv に対応</p>
+<div class="app-shell">
+  <!-- Full-window Drag Overlay -->
+  <div class="global-drop-overlay hidden" id="globalDropOverlay" aria-hidden="true">
+    <div class="global-drop-box">
+      <p class="global-drop-title">ここにExcelファイルをドロップして読み込み</p>
+      <p class="global-drop-sub">.xlsx / .xls / .csv に対応</p>
+    </div>
+  </div>
+
+  <!-- Top Header -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="16" y1="2" x2="16" y2="6"></line>
+            <line x1="8" y1="2" x2="8" y2="6"></line>
+            <line x1="3" y1="10" x2="21" y2="10"></line>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1 class="brand-title">定期試験日程データベース</h1>
+          <p class="brand-subtitle" id="dbMetaText">Excelファイルを読み込んでデータベース化します（ブラウザ内ローカル保存）</p>
+        </div>
+      </div>
+
+      <div class="header-actions no-print">
+        <button type="button" class="btn btn-ghost" id="loadSampleBtn" title="サンプルデータ（37件）を読み込んで動作を確認">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+          </svg>
+          <span>サンプル読込</span>
+        </button>
+        <button type="button" class="btn btn-secondary" id="toggleUploadBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <span>Excel読込</span>
+        </button>
+        <button type="button" class="btn btn-secondary" id="printBtn" title="現在の表示内容を印刷またはPDF保存">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="6 9 6 2 18 2 18 9"></polyline>
+            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+            <rect x="6" y="14" width="12" height="8"></rect>
+          </svg>
+          <span>印刷 / PDF</span>
+        </button>
       </div>
     </div>
+  </header>
 
-    <!-- Top Header -->
-    <header class="app-header">
-      <div class="header-inner">
-        <div class="brand">
-          <div class="brand-icon" aria-hidden="true">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-              <line x1="16" y1="2" x2="16" y2="6"></line>
-              <line x1="8" y1="2" x2="8" y2="6"></line>
-              <line x1="3" y1="10" x2="21" y2="10"></line>
-            </svg>
-          </div>
-          <div>
-            <h1 class="brand-title">定期試験日程データベース</h1>
-            <p class="brand-subtitle" id="dbMetaText">Excelファイルを読み込んでデータベース化します（ブラウザ内ローカル保存）</p>
-          </div>
+  <main class="main-container">
+    <!-- Upload Dropzone Panel -->
+    <section class="upload-panel no-print" id="uploadPanel">
+      <input
+              type="file"
+              id="fileInput"
+              class="sr-only-input"
+              accept=".xlsx,.xls,.xlsm,.ods,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+      />
+
+      <div class="dropzone" id="dropzone">
+        <div class="dropzone-icon" aria-hidden="true">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="12" y1="18" x2="12" y2="12"></line>
+            <polyline points="9 15 12 12 15 15"></polyline>
+          </svg>
         </div>
-
-        <div class="header-actions no-print">
-          <button type="button" class="btn btn-secondary" id="mobileModeBtn" aria-pressed="false" title="スマホ向けカード表示とPC向け一覧表示を切り替え">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="6" y="2" width="12" height="20" rx="2" ry="2"></rect>
-              <line x1="12" y1="18" x2="12.01" y2="18"></line>
-            </svg>
-            <span id="mobileModeBtnLabel">スマホモード</span>
-          </button>
-          <button type="button" class="btn btn-ghost" id="loadSampleBtn" title="サンプルデータ（37件）を読み込んで動作を確認">
-            サンプル読込
-          </button>
-          <button type="button" class="btn btn-secondary" id="toggleUploadBtn">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="17 8 12 3 7 8"></polyline>
-              <line x1="12" y1="3" x2="12" y2="15"></line>
-            </svg>
-            Excel読込 / 更新
-          </button>
-          <button type="button" class="btn btn-primary" id="printBtn" title="現在の表示内容を印刷またはPDF保存">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="6 9 6 2 18 2 18 9"></polyline>
-              <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
-              <rect x="6" y="14" width="12" height="8"></rect>
-            </svg>
-            印刷 / PDF
-          </button>
+        <p class="dropzone-title">大学から配布された試験日程Excel（.xlsx / .xls）をここにドロップ</p>
+        <p class="dropzone-desc">行数に関わらず全件を自動解析し、ブラウザ内データベースに保存します（外部送信なし）</p>
+        <div class="dropzone-actions">
+          <label for="fileInput" class="btn btn-primary file-select-label" role="button" tabindex="0">
+            ファイルを選択する
+          </label>
         </div>
       </div>
-    </header>
+    </section>
 
-    <main class="main-container">
-      <!-- Upload Dropzone Panel -->
-      <section class="upload-panel no-print" id="uploadPanel">
-        <!-- Visually hidden file input kept OUTSIDE dropzone to prevent click bubbling / display:none bugs -->
-        <input
-          type="file"
-          id="fileInput"
-          class="sr-only-input"
-          accept=".xlsx,.xls,.xlsm,.ods,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
-        />
+    <!-- Error Alert Banner -->
+    <div class="alert-banner hidden" id="errorBanner" role="alert">
+      <div class="alert-icon" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+      </div>
+      <div class="alert-content" id="errorMessage"></div>
+      <button type="button" class="alert-close" id="closeErrorBtn" aria-label="エラーを閉じる">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
 
-        <div class="dropzone" id="dropzone">
-          <div class="dropzone-icon" aria-hidden="true">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <line x1="12" y1="18" x2="12" y2="12"></line>
-              <polyline points="9 15 12 12 15 15"></polyline>
-            </svg>
-          </div>
-          <p class="dropzone-title">大学から配布された試験日程Excel（.xlsx / .xls）をここにドロップ</p>
-          <p class="dropzone-desc">行数に関わらず全件を自動解析し、ブラウザ内データベースに保存します（外部送信なし）</p>
-          <div class="dropzone-actions">
-            <label for="fileInput" class="btn btn-primary file-select-label" role="button" tabindex="0">
-              ファイルを選択する
-            </label>
-          </div>
-        </div>
-      </section>
+    <!-- Conflict Alert Banner for Pinned Subjects -->
+    <div class="alert-banner hidden" id="conflictBanner" role="alert">
+      <div class="alert-icon" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+          <line x1="12" y1="9" x2="12" y2="13"></line>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+      </div>
+      <div class="alert-content" id="conflictMessage"></div>
+    </div>
 
-      <!-- Error Alert Banner -->
-      <div class="alert-banner hidden" id="errorBanner" role="alert">
-        <div class="alert-icon">!</div>
-        <div class="alert-content" id="errorMessage"></div>
-        <button type="button" class="alert-close" id="closeErrorBtn" aria-label="エラーを閉じる">×</button>
+    <!-- Two Tabs & Utility Actions -->
+    <section class="toolbar-top no-print" id="workspaceControls">
+      <div class="view-tabs" role="tablist" aria-label="表示切替">
+        <button type="button" class="tab-btn active" data-view="all" role="tab" aria-selected="true">
+          <span>全科目</span>
+          <span class="badge" id="countAll">0</span>
+        </button>
+        <button type="button" class="tab-btn" data-view="pinned" role="tab" aria-selected="false">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+          </svg>
+          <span>マイ試験日程</span>
+          <span class="badge badge-accent" id="countPinned">0</span>
+        </button>
       </div>
 
-      <!-- Conflict Alert Banner for Pinned Subjects -->
-      <div class="alert-banner hidden" id="conflictBanner" role="alert">
-        <div class="alert-icon">!</div>
-        <div class="alert-content" id="conflictMessage"></div>
+      <div class="quick-actions">
+        <button type="button" class="btn btn-sm btn-ghost" id="exportIcsBtn" title="マイ試験日程をカレンダー(.ics)形式で書き出し">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="16" y1="2" x2="16" y2="6"></line>
+            <line x1="8" y1="2" x2="8" y2="6"></line>
+            <line x1="3" y1="10" x2="21" y2="10"></line>
+          </svg>
+          <span>.ics書き出し</span>
+        </button>
+        <button type="button" class="btn btn-sm btn-ghost" id="clearPinsBtn" title="マイ試験日程の選択をすべて解除">
+          <span>登録全解除</span>
+        </button>
+        <button type="button" class="btn btn-sm btn-danger-ghost" id="resetDbBtn" title="保存されているデータベースを削除">
+          <span>DB初期化</span>
+        </button>
       </div>
+    </section>
 
-      <!-- Summary & View Mode Bar -->
-      <section class="toolbar-top no-print" id="workspaceControls">
-        <div class="view-tabs" role="tablist" aria-label="表示切替">
-          <button type="button" class="tab-btn active" data-view="all" role="tab" aria-selected="true">
-            全科目一覧 <span class="badge" id="countAll">0</span>
-          </button>
-          <button type="button" class="tab-btn" data-view="pinned" role="tab" aria-selected="false">
-            ★ マイ試験日程 <span class="badge badge-accent" id="countPinned">0</span>
-          </button>
-          <button type="button" class="tab-btn" data-view="timeline" role="tab" aria-selected="false">
-            試験日別タイムライン
-          </button>
-        </div>
-
-        <div class="quick-actions">
-          <button type="button" class="btn btn-sm btn-ghost" id="exportIcsBtn" title="マイ試験日程をカレンダー(.ics)形式で書き出し">
-            .ics書き出し
-          </button>
-          <button type="button" class="btn btn-sm btn-ghost" id="clearPinsBtn" title="マイ試験日程の選択をすべて解除">
-            ★解除
-          </button>
-          <button type="button" class="btn btn-sm btn-danger-ghost" id="resetDbBtn" title="保存されているデータベースを削除">
-            DB初期化
-          </button>
-        </div>
-      </section>
-
-      <!-- Filter & Sort Card -->
-      <section class="filter-card no-print" id="filterCard">
-        <div class="search-row">
-          <div class="search-input-wrap">
-            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+    <!-- Compact Search, Filter Trigger & Sort Bar -->
+    <section class="search-toolbar no-print" id="searchToolbar">
+      <div class="search-main-row">
+        <div class="search-input-wrap">
+          <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input
+                  type="search"
+                  id="searchInput"
+                  class="search-input"
+                  placeholder="科目名・担当教員・教室・コードで検索"
+                  autocomplete="off"
+          />
+          <button type="button" class="search-clear hidden" id="clearSearchBtn" aria-label="検索キーワードをクリア">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
-            <input
-              type="search"
-              id="searchInput"
-              class="search-input"
-              placeholder="科目名・担当教員・クラス・教室・番号で検索..."
-              autocomplete="off"
-            />
-            <button type="button" class="search-clear hidden" id="clearSearchBtn" aria-label="検索をクリア">×</button>
-          </div>
+          </button>
+        </div>
+
+        <div class="toolbar-controls-row">
+          <button type="button" class="btn btn-secondary filter-open-btn" id="openFilterDrawerBtn" aria-haspopup="dialog" aria-expanded="false" aria-controls="filterDrawer">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="4" y1="21" x2="4" y2="14"></line>
+              <line x1="4" y1="10" x2="4" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="12"></line>
+              <line x1="12" y1="8" x2="12" y2="3"></line>
+              <line x1="20" y1="21" x2="20" y2="16"></line>
+              <line x1="20" y1="12" x2="20" y2="3"></line>
+              <line x1="1" y1="14" x2="7" y2="14"></line>
+              <line x1="9" y1="8" x2="15" y2="8"></line>
+              <line x1="17" y1="16" x2="23" y2="16"></line>
+            </svg>
+            <span>絞り込み</span>
+            <span class="filter-count-pill hidden" id="activeFilterBadge">0</span>
+          </button>
 
           <div class="sort-wrap">
-            <label for="sortSelect" class="filter-label-inline">並び替え</label>
-            <select id="sortSelect" class="select-control">
+            <label for="sortSelect" class="sr-only">並び替え</label>
+            <select id="sortSelect" class="select-control" aria-label="並び替え">
               <option value="examDate_asc">試験日時順（早い順）</option>
               <option value="examDate_desc">試験日時順（遅い順）</option>
               <option value="subject_asc">科目名順（五十音 A→Z）</option>
               <option value="subject_desc">科目名順（逆順 Z→A）</option>
-              <option value="dept_asc">学科・クラスコード順</option>
+              <option value="dept_asc">学科・時間割コード順</option>
               <option value="regular_asc">通常授業の曜日・時限順</option>
               <option value="no_asc">通し番号順（Excel元順）</option>
               <option value="room_asc">試験教室順</option>
             </select>
           </div>
         </div>
-
-        <!-- Collapsible toggle shown in Smartphone Mode -->
-        <button type="button" class="mobile-filter-toggle" id="toggleMobileFiltersBtn" aria-expanded="false">
-          <span class="mobile-filter-toggle-left">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
-            </svg>
-            <span>詳細絞り込み（学科・校舎・試験日・曜日・時限）</span>
-            <span class="active-filter-badge hidden" id="activeFilterCountBadge">0</span>
-          </span>
-          <span class="mobile-filter-chevron" id="mobileFilterChevron">▼</span>
-        </button>
-
-        <div class="filter-grid" id="filterGrid">
-          <div class="filter-group">
-            <label for="filterDept" class="filter-label">学科・区分</label>
-            <select id="filterDept" class="select-control">
-              <option value="">すべての学科・区分</option>
-            </select>
-          </div>
-
-          <div class="filter-group">
-            <label for="filterCampus" class="filter-label">校舎</label>
-            <select id="filterCampus" class="select-control">
-              <option value="">すべての校舎</option>
-            </select>
-          </div>
-
-          <div class="filter-group">
-            <label for="filterExamDate" class="filter-label">試験日</label>
-            <select id="filterExamDate" class="select-control">
-              <option value="">すべての試験日</option>
-            </select>
-          </div>
-
-          <div class="filter-group">
-            <label for="filterRegDay" class="filter-label">通常授業（曜日）</label>
-            <select id="filterRegDay" class="select-control">
-              <option value="">すべて</option>
-              <option value="月">月曜</option>
-              <option value="火">火曜</option>
-              <option value="水">水曜</option>
-              <option value="木">木曜</option>
-              <option value="金">金曜</option>
-              <option value="土">土曜</option>
-              <option value="日">日曜</option>
-            </select>
-          </div>
-
-          <div class="filter-group">
-            <label for="filterRegPeriod" class="filter-label">通常授業（時限）</label>
-            <select id="filterRegPeriod" class="select-control">
-              <option value="">すべて</option>
-            </select>
-          </div>
-
-          <div class="filter-group">
-            <label for="filterStatus" class="filter-label">試験実施有無</label>
-            <select id="filterStatus" class="select-control">
-              <option value="">すべて表示</option>
-              <option value="実施する">「実施する」のみ</option>
-              <option value="実施しない">「実施しない」のみ</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="filter-footer">
-          <div class="result-stats" id="resultStats">
-            表示件数: <strong>0</strong> 件
-          </div>
-          <button type="button" class="btn btn-sm btn-ghost" id="resetFiltersBtn">
-            絞り込み条件をリセット
-          </button>
-        </div>
-      </section>
-
-      <!-- Print Header (Visible only when printing) -->
-      <div class="print-only print-header">
-        <h2 id="printTitle">定期試験日程一覧</h2>
-        <p id="printMeta"></p>
       </div>
 
-      <!-- Main Data Table / Mobile Card View -->
-      <section class="table-card" id="tableView">
-        <!-- Desktop Table -->
-        <div class="table-responsive" id="desktopTableWrap">
-          <table class="data-table" id="scheduleTable">
-            <thead>
-              <tr>
-                <th class="col-pin no-print" title="マイ試験日程に登録">★</th>
-                <th class="col-no sortable" data-sort="no">No.</th>
-                <th class="col-dept sortable" data-sort="dept">学科・区分</th>
-                <th class="col-code sortable" data-sort="code">クラス</th>
-                <th class="col-reg sortable" data-sort="regular">通常授業</th>
-                <th class="col-subject sortable" data-sort="subject">科目名</th>
-                <th class="col-teacher sortable" data-sort="instructor">担当教員</th>
-                <th class="col-campus sortable" data-sort="campus">校舎</th>
-                <th class="col-exam sortable" data-sort="examDate">試験日時</th>
-                <th class="col-room sortable" data-sort="room">試験教室</th>
-                <th class="col-status sortable" data-sort="status">実施</th>
-              </tr>
-            </thead>
-            <tbody id="tableBody">
-              <!-- Rows injected dynamically by script.js -->
-            </tbody>
-          </table>
+      <!-- Active Filter Summary Tags (Remains visible after closing drawer) -->
+      <div class="active-filters-bar hidden" id="activeFiltersBar" aria-label="適用中の絞り込み条件">
+        <div class="active-filter-tags" id="activeFilterTags"></div>
+        <button type="button" class="btn-link-clear" id="quickClearAllFiltersBtn">すべて解除</button>
+      </div>
+
+      <div class="result-bar">
+        <div class="result-stats" id="resultStats">
+          表示件数: <strong>0</strong> 件
         </div>
+      </div>
+    </section>
 
-        <!-- Smartphone Mode Card List -->
-        <div class="mobile-card-list no-print" id="mobileCardList"></div>
+    <!-- Print Header (Visible only when printing) -->
+    <div class="print-only print-header">
+      <h2 id="printTitle">定期試験日程一覧</h2>
+      <p id="printMeta"></p>
+    </div>
 
-        <!-- Empty State -->
-        <div class="empty-state hidden" id="emptyState">
-          <p class="empty-title" id="emptyTitle">データがありません</p>
-          <p class="empty-desc" id="emptyDesc">上部のエリアからExcelファイルを読み込むか、「サンプル読込」を押してください。</p>
+    <!-- Main Schedule Card List Section -->
+    <section class="schedule-section" id="scheduleListSection" aria-busy="false">
+      <!-- Skeleton Loader (Solid shades only) -->
+      <div class="card-grid skeleton-grid hidden" id="skeletonGrid" aria-hidden="true">
+        <div class="skeleton-card">
+          <div class="skeleton-line skeleton-line-sm"></div>
+          <div class="skeleton-line skeleton-line-lg"></div>
+          <div class="skeleton-line skeleton-line-md"></div>
+          <div class="skeleton-line skeleton-line-sm"></div>
         </div>
-      </section>
+        <div class="skeleton-card">
+          <div class="skeleton-line skeleton-line-sm"></div>
+          <div class="skeleton-line skeleton-line-lg"></div>
+          <div class="skeleton-line skeleton-line-md"></div>
+          <div class="skeleton-line skeleton-line-sm"></div>
+        </div>
+        <div class="skeleton-card">
+          <div class="skeleton-line skeleton-line-sm"></div>
+          <div class="skeleton-line skeleton-line-lg"></div>
+          <div class="skeleton-line skeleton-line-md"></div>
+          <div class="skeleton-line skeleton-line-sm"></div>
+        </div>
+        <div class="skeleton-card">
+          <div class="skeleton-line skeleton-line-sm"></div>
+          <div class="skeleton-line skeleton-line-lg"></div>
+          <div class="skeleton-line skeleton-line-md"></div>
+          <div class="skeleton-line skeleton-line-sm"></div>
+        </div>
+      </div>
 
-      <!-- Timeline View (Grouped by Exam Date) -->
-      <section class="timeline-container hidden" id="timelineView"></section>
-    </main>
+      <!-- Card List Container (Grouped by date or flat grid) -->
+      <div class="card-list-container no-print" id="cardListContainer"></div>
+
+      <!-- Print-Only Clean Table -->
+      <div class="print-only print-table-wrap">
+        <table class="data-table">
+          <thead>
+          <tr>
+            <th>No.</th>
+            <th>学科</th>
+            <th>時間割コード</th>
+            <th>通常授業</th>
+            <th>科目名</th>
+            <th>担当教員</th>
+            <th>校舎</th>
+            <th>理解度確認テスト日程</th>
+            <th>実施教室</th>
+            <th>追評価</th>
+          </tr>
+          </thead>
+          <tbody id="printTableBody"></tbody>
+        </table>
+      </div>
+
+      <!-- Empty State -->
+      <div class="empty-state hidden" id="emptyState">
+        <p class="empty-title" id="emptyTitle">データがありません</p>
+        <p class="empty-desc" id="emptyDesc">上部のエリアからExcelファイルを読み込むか、「サンプル読込」を押してください。</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- =======================================================================
+     Left Slide-In Filter Drawer
+     ======================================================================= -->
+<div class="drawer-backdrop hidden" id="filterDrawerBackdrop" aria-hidden="true"></div>
+<aside
+        class="filter-drawer hidden"
+        id="filterDrawer"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="filterDrawerTitle"
+>
+  <div class="drawer-header">
+    <h2 class="drawer-title" id="filterDrawerTitle">絞り込み条件</h2>
+    <button type="button" class="icon-close-btn" id="closeFilterDrawerBtn" aria-label="絞り込みパネルを閉じる">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+      </svg>
+    </button>
   </div>
 
-  <!-- Toast Notification -->
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="drawer-body" id="filterDrawerBody">
+    <!-- 1. 学科・区分 (Dropdown) -->
+    <div class="drawer-field">
+      <label for="drawerFilterDept" class="drawer-label">学科・区分</label>
+      <select id="drawerFilterDept" class="select-control drawer-select">
+        <option value="">すべての学科・区分</option>
+      </select>
+    </div>
 
-  <script>
-    window.__SAMPLE_EXAM_ROWS__ = [[170, "一般教育", "F13C", "月", 3, "微分積分学Ⅱ", "山崎　晋", "船橋校舎", "12月21日(月)3時限", "1131", "実施する"], [171, "一般教育", "F13D", "月", 3, "微分積分学Ⅱ", "林　誠", "船橋校舎", "12月21日(月)3時限", "1132", "実施しない"], [252, "電気工学科", "I21A", "火", 1, "電磁気の基礎", "古川　慎一", "船橋校舎", "1月12日(火)1時限", 1432, "実施する"], [253, "電気工学科", "I21B", "火", 1, "電気回路の基礎", "塩野　光弘", "船橋校舎", "1月12日(火)2時限", 1433, "実施する"], [254, "電気工学科", "I21O", "火", 1, "ｺﾝﾋﾟｭｰﾀｼﾐｭﾚｰｼｮﾝⅠ", "岸本　誠也", "駿河台校舎", "1月12日(火)1時限", "S501 S502", "実施する"], [255, "電気工学科", "I21P", "火", 1, "回路の過渡応答", "辻　健太郎", "駿河台校舎", "12月22日(火)1時限", "S203", "実施する"], [256, "電気工学科", "I22A", "火", 2, "電気回路の基礎", "塩野　光弘", "船橋校舎", "1月12日(火)2時限", 1432, "実施する"], [257, "電気工学科", "I22B", "火", 2, "電磁気の基礎", "古川　慎一", "船橋校舎", "1月12日(火)1時限", 1433, "実施する"], [258, "電気工学科", "I22M", "火", 2, "回路の過渡応答", "星野　貴弘", "駿河台校舎", "12月22日(火)2時限", "S505", "実施する"], [259, "電気工学科", "I22N", "火", 2, "ｺﾝﾋﾟｭｰﾀｼﾐｭﾚｰｼｮﾝⅠ", "岸本　誠也", "駿河台校舎", "1月12日(火)1時限", "S501 S502", "実施する"], [260, "一般教育", "I23F", "火", 3, "英語ⅠB", "河口　英治", "船橋校舎", "12月22日(火)3時限", "1131", "実施する"], [292, "一般教育", "J14F", "月", 4, "英語ⅠB", "甲田　直喜", "船橋校舎", "12月21日(月)4時限", "1233", "実施する"], [293, "電子工学科", "J15A", "月", 5, "電磁気学のための基礎数学", "芦澤・高橋（芳）　他", "船橋校舎", "12月21日(月)5時限", "1021 1023", "実施する"], [294, "電子工学科", "J21B", "火", 1, "通信システム基礎", "瀧川　道生", "船橋校舎", "12月22日(火)1時限", "1441", "実施する"], [295, "一般教育", "J22A", "火", 2, "回路理論Ⅱ", "布施　匡章", "船橋校舎", "12月22日(火)2時限", "1231", "実施する"], [296, "電子工学科", "J22B", "火", 2, "回路理論Ⅱ", "三枝　健二", "船橋校舎", "12月22日(火)2時限", "1232", "実施する"], [297, "電子工学科", "J22C", "火", 2, "回路理論Ⅰ", "佐々木　芳樹", "船橋校舎", "12月22日(火)2時限", "1454", "実施する"], [298, "電子工学科", "J22I", "火", 2, "システム工学", "高橋　聖", "船橋校舎", "12月22日(火)2時限", "1012", "実施する"], [299, "一般教育", "J31B", "水", 1, "線形代数学Ⅱ", "船越　正太", "船橋校舎", "12月23日(水)1時限", "1141", "実施する"], [300, "電子工学科", "J31F", "水", "1･2", "電磁気学Ⅱ及び演習", "岩田　展幸", "船橋校舎", "12月23日(水)1・2時限", "1231 1221", "実施する"], [301, "電子工学科", "J31G", "水", "1･2", "電磁気学Ⅱ及び演習", "芦澤　好人", "船橋校舎", "12月23日(水)1・2時限", "1232 1224", "実施する"], [302, "電子工学科", "J31H", "水", "1･2", "電磁気学Ⅰ及び演習", "高橋　芳浩", "船橋校舎", "12月23日(水)1・2時限", "1458", "実施する"], [303, "電子工学科", "J32B", "水", 2, "情報ネットワーク基礎", "澤邉　知子", "船橋校舎", "1月13日(水)2時限", 1031, "実施する"], [304, "電子工学科", "J33F", "水", 3, "ロボット工学", "入江　寿弘", "船橋校舎", "12月23日(水)3時限", "1444", "実施する"], [305, "一般教育", "J41C", "木", 1, "力と運動の物理学Ⅱ", "坂元　啓紀", "船橋校舎", "12月24日(木)1時限", "1422", "実施する"], [306, "一般教育", "J41D", "木", 1, "力と運動の物理学Ⅱ", "井口　英雄", "船橋校舎", "12月24日(木)1時限", "1423", "実施する"], [307, "一般教育", "J42B", "木", 2, "力と運動の物理学Ⅱ演習", "坂元・佐々木　他", "船橋校舎", "12月24日(木)2時限", "624 625 634 635", "実施する"], [308, "電子工学科", "J42E", "木", 2, "電子回路Ⅱ", "佐伯　勝敏", "船橋校舎", "12月24日(木)2時限", "1444", "実施する"], [309, "電子工学科", "J42F", "木", 2, "電子回路Ⅰ", "今池　健", "船橋校舎", "12月24日(木)2時限", "1456", "実施する"], [310, "電子工学科", "J42H", "木", 2, "アンテナ・電波伝搬", "瀧川　道生", "船橋校舎", "12月24日(木)2時限", "1421", "実施する"], [311, "電子工学科", "J43D", "木", "3･4", "計算機ソフトウェア及び演習", "金　炯秀", "船橋校舎", "1月14日(木)3・4時限", 1231, "実施する"], [312, "電子工学科", "J51D", "金", 1, "アナログ集積回路", "今池　健", "船橋校舎", "12月25日(金)1時限", "1441", "実施する"], [313, "電子工学科", "J53A", "金", 3, "ディジタル信号処理", "布施　匡章", "船橋校舎", "12月25日(金)3時限", "1431", "実施する"], [314, "電子工学科", "J54A", "金", 4, "分布定数回路", "小林　一彦", "船橋校舎", "12月25日(金)4時限", "1431", "実施する"], [315, "電子工学科", "J54C", "金", 4, "半導体物性工学", "高橋　芳浩", "船橋校舎", "12月25日(金)4時限", "443", "実施する"], [316, "応用情報工学科", "K12B", "月", 2, "離散数学", "松野・村上", "船橋校舎", "12月21日(月)2時限", "階段教室(小)", "実施する"], [317, "応用情報工学科", "K12D", "月", 2, "データベース", "関　弘翔", "船橋校舎", "12月21日(月)2時限", 1113, "実施する"]];
-  </script>
-  <script src="script.js" defer></script>
+    <!-- 2. 校舎 (Single-select Chips) -->
+    <div class="drawer-field">
+      <div class="drawer-label-row">
+        <span class="drawer-label" id="labelCampusGroup">校舎</span>
+        <span class="drawer-hint">1つ選択（再タップで解除）</span>
+      </div>
+      <div class="chip-group" id="drawerCampusChips" role="group" aria-labelledby="labelCampusGroup"></div>
+    </div>
+
+    <!-- 3. 試験日 (Multi-select Chips) -->
+    <div class="drawer-field">
+      <div class="drawer-label-row">
+        <span class="drawer-label" id="labelExamDateGroup">試験日</span>
+        <span class="drawer-hint">複数選択可</span>
+      </div>
+      <div class="chip-group" id="drawerExamDateChips" role="group" aria-labelledby="labelExamDateGroup"></div>
+    </div>
+
+    <!-- 4. 通常授業の曜日 (Multi-select Chips) -->
+    <div class="drawer-field">
+      <div class="drawer-label-row">
+        <span class="drawer-label" id="labelRegDayGroup">通常授業の曜日</span>
+        <span class="drawer-hint">複数選択可</span>
+      </div>
+      <div class="chip-group day-chip-group" id="drawerRegDayChips" role="group" aria-labelledby="labelRegDayGroup"></div>
+    </div>
+
+    <!-- 5. 通常授業の時限 (Multi-select Chips) -->
+    <div class="drawer-field">
+      <div class="drawer-label-row">
+        <span class="drawer-label" id="labelRegPeriodGroup">通常授業の時限</span>
+        <span class="drawer-hint">複数選択可</span>
+      </div>
+      <div class="chip-group" id="drawerRegPeriodChips" role="group" aria-labelledby="labelRegPeriodGroup"></div>
+    </div>
+
+    <!-- 6. 追評価の実施有無 (Segmented Control) -->
+    <div class="drawer-field">
+      <span class="drawer-label" id="labelMakeupStatusGroup">追評価の実施有無</span>
+      <div class="segmented-control" id="drawerStatusSegments" role="radiogroup" aria-labelledby="labelMakeupStatusGroup">
+        <button type="button" class="segment-btn active" role="radio" aria-checked="true" data-value="">すべて</button>
+        <button type="button" class="segment-btn" role="radio" aria-checked="false" data-value="実施する">実施する</button>
+        <button type="button" class="segment-btn" role="radio" aria-checked="false" data-value="実施しない">実施しない</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="drawer-footer">
+    <button type="button" class="btn btn-ghost drawer-reset-btn" id="drawerResetBtn">
+      条件をクリア
+    </button>
+    <button type="button" class="btn btn-primary drawer-apply-btn" id="drawerApplyBtn">
+      絞り込む
+    </button>
+  </div>
+</aside>
+
+<!-- =======================================================================
+     Unsaved Filter Changes Confirmation Modal
+     ======================================================================= -->
+<div class="modal-backdrop hidden" id="unsavedModalBackdrop" aria-hidden="true"></div>
+<div
+        class="modal-dialog modal-dialog-sm hidden"
+        id="unsavedConfirmModal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="unsavedModalTitle"
+        aria-describedby="unsavedModalDesc"
+>
+  <div class="modal-header">
+    <h2 class="modal-title" id="unsavedModalTitle">絞り込み条件がまだ反映されていません</h2>
+  </div>
+  <div class="modal-body">
+    <p class="modal-message" id="unsavedModalDesc">
+      変更した絞り込み条件を試験一覧に反映しますか？反映せずに閉じると、今回の変更内容は破棄されます。
+    </p>
+  </div>
+  <div class="modal-footer modal-footer-stack">
+    <button type="button" class="btn btn-primary btn-block" id="unsavedApplyBtn">
+      変更を適用して絞り込む
+    </button>
+    <button type="button" class="btn btn-secondary btn-block" id="unsavedDiscardBtn">
+      変更を破棄して閉じる
+    </button>
+  </div>
+</div>
+
+<!-- =======================================================================
+     Subject Detail Modal
+     ======================================================================= -->
+<div class="modal-backdrop hidden" id="detailModalBackdrop" aria-hidden="true"></div>
+<div
+        class="modal-dialog hidden"
+        id="detailModal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="detailModalTitle"
+>
+  <div class="modal-header">
+    <div class="detail-header-text">
+      <span class="detail-eyebrow" id="detailModalEyebrow">科目詳細</span>
+      <h2 class="modal-title" id="detailModalTitle">科目名</h2>
+    </div>
+    <button type="button" class="icon-close-btn" id="closeDetailModalBtn" aria-label="詳細モーダルを閉じる">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+      </svg>
+    </button>
+  </div>
+
+  <div class="modal-body" id="detailModalBody">
+    <!-- Populated dynamically with all 10 record fields -->
+  </div>
+
+  <div class="modal-footer">
+    <button type="button" class="btn btn-secondary" id="detailModalPinBtn">
+      マイ試験日程に登録
+    </button>
+    <button type="button" class="btn btn-primary" id="detailModalCloseFooterBtn">
+      閉じる
+    </button>
+  </div>
+</div>
+
+<!-- Toast Notification -->
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+  window.__SAMPLE_EXAM_ROWS__ = [[170, "一般教育", "F13C", "月", 3, "微分積分学Ⅱ", "山崎 晋", "船橋校舎", "12月21日(月)3時限", "1131", "実施する"], [171, "一般教育", "F13D", "月", 3, "微分積分学Ⅱ", "林 誠", "船橋校舎", "12月21日(月)3時限", "1132", "実施しない"], [252, "電気工学科", "I21A", "火", 1, "電磁気の基礎", "古川 慎一", "船橋校舎", "1月12日(火)1時限", 1432, "実施する"], [253, "電気工学科", "I21B", "火", 1, "電気回路の基礎", "塩野 光弘", "船橋校舎", "1月12日(火)2時限", 1433, "実施する"], [254, "電気工学科", "I21O", "火", 1, "ｺﾝﾋﾟｭｰﾀｼﾐｭﾚｰﾀⅠ", "岸本 誠也", "駿河台校舎", "1月12日(火)1時限", "S501 S502", "実施する"], [255, "電気工学科", "I21P", "火", 1, "回路の過渡応答", "辻 健太郎", "駿河台校舎", "12月22日(火)1時限", "S203", "実施する"], [256, "電気工学科", "I22A", "火", 2, "電気回路の基礎", "塩野 光弘", "船橋校舎", "1月12日(火)2時限", 1432, "実施する"], [257, "電気工学科", "I22B", "火", 2, "電磁気の基礎", "古川 慎一", "船橋校舎", "1月12日(火)1時限", 1433, "実施する"], [258, "電気工学科", "I22M", "火", 2, "回路の過渡応答", "星野 貴弘", "駿河台校舎", "12月22日(火)2時限", "S505", "実施する"], [259, "電気工学科", "I22N", "火", 2, "ｺﾝﾋﾟｭｰﾀｼﾐｭﾚｰﾀⅠ", "岸本 誠也", "駿河台校舎", "1月12日(火)1時限", "S501 S502", "実施する"], [260, "一般教育", "I23F", "火", 3, "英語ⅠB", "河口 英治", "船橋校舎", "12月22日(火)3時限", "1131", "実施する"], [292, "一般教育", "J14F", "月", 4, "英語ⅠB", "甲田 直喜", "船橋校舎", "12月21日(月)4時限", "1233", "実施する"], [293, "電子工学科", "J15A", "月", 5, "電磁気学のための基礎数学", "芦澤・高橋（芳） 他", "船橋校舎", "12月21日(月)5時限", "1021 1023", "実施する"], [294, "電子工学科", "J21B", "火", 1, "通信システム基礎", "瀧川 道生", "船橋校舎", "12月22日(火)1時限", "1441", "実施する"], [295, "一般教育", "J22A", "火", 2, "回路理論Ⅱ", "布施 匡章", "船橋校舎", "12月22日(火)2時限", "1231", "実施する"], [296, "電子工学科", "J22B", "火", 2, "回路理論Ⅱ", "三枝 健二", "船橋校舎", "12月22日(火)2時限", "1232", "実施する"], [297, "電子工学科", "J22C", "火", 2, "回路理論Ⅰ", "佐々木 芳樹", "船橋校舎", "12月22日(火)2時限", "1454", "実施する"], [298, "電子工学科", "J22I", "火", 2, "システム工学", "高橋 聖", "船橋校舎", "12月22日(火)2時限", "1012", "実施する"], [299, "一般教育", "J31B", "水", 1, "線形代数学Ⅱ", "船越 正太", "船橋校舎", "12月23日(水)1時限", "1141", "実施する"], [300, "電子工学科", "J31F", "水", "1･2", "電磁気学Ⅱ及び演習", "岩田 展幸", "船橋校舎", "12月23日(水)1・2時限", "1231 1221", "実施する"], [301, "電子工学科", "J31G", "水", "1･2", "電磁気学Ⅱ及び演習", "芦澤 好人", "船橋校舎", "12月23日(水)1・2時限", "1232 1224", "実施する"], [302, "電子工学科", "J31H", "水", "1･2", "電磁気学Ⅰ及び演習", "高橋 芳浩", "船橋校舎", "12月23日(水)1・2時限", "1458", "実施する"], [303, "電子工学科", "J32B", "水", 2, "情報ネットワーク基礎", "澤邉 知子", "船橋校舎", "1月13日(水)2時限", 1031, "実施する"], [304, "電子工学科", "J33F", "水", 3, "ロボット工学", "入江 寿弘", "船橋校舎", "12月23日(水)3時限", "1444", "実施する"], [305, "一般教育", "J41C", "木", 1, "力と運動の物理学Ⅱ", "坂元 啓紀", "船橋校舎", "12月24日(木)1時限", "1422", "実施する"], [306, "一般教育", "J41D", "木", 1, "力と運動の物理学Ⅱ", "井口 英雄", "船橋校舎", "12月24日(木)1時限", "1423", "実施する"], [307, "一般教育", "J42B", "木", 2, "力と運動の物理学Ⅱ演習", "坂元・佐々木 他", "船橋校舎", "12月24日(木)2時限", "624 625 634 635", "実施する"], [308, "電子工学科", "J42E", "木", 2, "電子回路Ⅱ", "佐伯 勝敏", "船橋校舎", "12月24日(木)2時限", "1444", "実施する"], [309, "電子工学科", "J42F", "木", 2, "電子回路Ⅰ", "今池 健", "船橋校舎", "12月24日(木)2時限", "1456", "実施する"], [310, "電子工学科", "J42H", "木", 2, "アンテナ・電波伝搬", "瀧川 道生", "船橋校舎", "12月24日(木)2時限", "1421", "実施する"], [311, "電子工学科", "J43D", "木", "3･4", "計算機ソフトウェア及び演習", "金 炯秀", "船橋校舎", "1月14日(木)3・4時限", 1231, "実施する"], [312, "電子工学科", "J51D", "金", 1, "アナログ集積回路", "今池 健", "船橋校舎", "12月25日(金)1時限", "1441", "実施する"], [313, "電子工学科", "J53A", "金", 3, "ディジタル信号処理", "布施 匡章", "船橋校舎", "12月25日(金)3時限", "1431", "実施する"], [314, "電子工学科", "J54A", "金", 4, "分布定数回路", "小林 一彦", "船橋校舎", "12月25日(金)4時限", "1431", "実施する"], [315, "電子工学科", "J54C", "金", 4, "半導体物性工学", "高橋 芳浩", "船橋校舎", "12月25日(金)4時限", "443", "実施する"], [316, "応用情報工学科", "K12B", "月", 2, "離散数学", "松野・村上", "船橋校舎", "12月21日(月)2時限", "階段教室(小)", "実施する"], [317, "応用情報工学科", "K12D", "月", 2, "データベース", "関 弘翔", "船橋校舎", "12月21日(月)2時限", 1113, "実施する"]];
+</script>
+<script src="script.js" defer></script>
 </body>
 </html>
