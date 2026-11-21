@@ -1,9 +1,9 @@
 /* ==========================================================================
    Simple Modern White Theme - University Exam Schedule Database
    - Mobile-First Responsive Card Grid (1 col -> 2 col -> 3 col)
-   - Left Slide-In Filter Drawer & Unsaved Changes Confirmation Modal
-   - Subject Detail Modal
+   - Unified Left Slide-In Drawer (Hamburger Menu + Filter Controls)
    - Strict 8px Spacing Scale (8, 16, 24, 32, 40, 48px) & Solid Colors Only
+   - Scroll Performance Optimized (content-visibility, compact header)
    ========================================================================== */
 
 :root {
@@ -36,9 +36,11 @@
   --danger-bg: #fef2f2;
   --danger-text: #b91c1c;
   --danger-border: #fecaca;
+  --danger-solid: #b91c1c;
+  --danger-solid-hover: #991b1b;
 
   --radius-sm: 8px;
-  --radius-md: 12px;
+  --radius-md: 8px;
   --radius-lg: 16px;
 
   --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
@@ -54,6 +56,7 @@
 html {
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
 }
 
 body {
@@ -63,6 +66,8 @@ body {
   background-color: var(--bg-canvas);
   color: var(--text-primary);
   line-height: 1.5;
+  overflow-x: hidden;
+  max-width: 100%;
 }
 
 body.overlay-open {
@@ -108,6 +113,7 @@ body.overlay-open {
   padding: 32px;
   text-align: center;
   box-shadow: var(--shadow-md);
+  max-width: 100%;
 }
 
 .global-drop-title {
@@ -115,6 +121,7 @@ body.overlay-open {
   font-size: 1.125rem;
   font-weight: 700;
   color: var(--accent);
+  overflow-wrap: anywhere;
 }
 
 .global-drop-sub {
@@ -124,7 +131,7 @@ body.overlay-open {
 }
 
 /* ==========================================================================
-   Header
+   Compact Sticky Header with Hamburger Button
    ========================================================================== */
 .app-header {
   background-color: var(--bg-surface);
@@ -137,9 +144,10 @@ body.overlay-open {
 .header-inner {
   max-width: 1280px;
   margin: 0 auto;
-  padding: 16px;
+  padding: 8px 16px;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
   gap: 16px;
 }
 
@@ -147,47 +155,63 @@ body.overlay-open {
   display: flex;
   align-items: center;
   gap: 16px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
-.brand-icon {
-  width: 40px;
-  height: 40px;
+.hamburger-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 16px;
   border-radius: var(--radius-sm);
-  background-color: var(--accent-soft);
-  color: var(--accent);
-  border: 1px solid var(--accent-border);
-  display: grid;
-  place-items: center;
+  border: 1px solid var(--border-medium);
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
   flex-shrink: 0;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.hamburger-btn:hover {
+  background-color: var(--bg-subtle);
+  border-color: var(--border-strong);
+}
+
+.hamburger-label {
+  line-height: 1.2;
 }
 
 .brand-text {
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .brand-title {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: 1.0625rem;
   font-weight: 700;
   color: var(--text-primary);
   line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .brand-subtitle {
   margin: 0;
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
-.header-actions {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-
 /* ==========================================================================
-   Buttons
+   Buttons & Focus Styles
    ========================================================================== */
 .btn {
   display: inline-flex;
@@ -202,27 +226,27 @@ body.overlay-open {
   border: 1px solid transparent;
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-  white-space: nowrap;
   font-family: inherit;
   text-decoration: none;
+  text-align: center;
+  line-height: 1.3;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .btn:focus-visible,
+.hamburger-btn:focus-visible,
+.menu-guide-link:focus-visible,
 .tab-btn:focus-visible,
 .chip-btn:focus-visible,
 .segment-btn:focus-visible,
+.drawer-menu-item:focus-visible,
 .icon-close-btn:focus-visible,
 .pin-btn:focus-visible,
 .select-control:focus-visible,
 .search-input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-
-.btn-sm {
-  min-height: 36px;
-  padding: 8px 16px;
-  font-size: 0.8125rem;
 }
 
 .btn-block {
@@ -261,15 +285,15 @@ body.overlay-open {
   color: var(--text-primary);
 }
 
-.btn-danger-ghost {
-  background-color: var(--bg-surface);
-  color: var(--danger-text);
-  border-color: var(--border-light);
+.btn-danger {
+  background-color: var(--danger-solid);
+  color: #ffffff;
+  border-color: var(--danger-solid);
 }
 
-.btn-danger-ghost:hover {
-  background-color: var(--danger-bg);
-  border-color: var(--danger-border);
+.btn-danger:hover {
+  background-color: var(--danger-solid-hover);
+  border-color: var(--danger-solid-hover);
 }
 
 /* ==========================================================================
@@ -320,18 +344,22 @@ body.overlay-open {
   font-weight: 700;
   font-size: 0.9375rem;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
 .dropzone-desc {
   margin: 8px 0 0;
   font-size: 0.8125rem;
   color: var(--text-muted);
+  overflow-wrap: anywhere;
 }
 
 .dropzone-actions {
   margin-top: 16px;
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
+  gap: 8px;
 }
 
 /* ==========================================================================
@@ -352,12 +380,12 @@ body.overlay-open {
 .alert-icon {
   flex-shrink: 0;
   display: inline-flex;
-  margin-top: 0;
 }
 
 .alert-content {
   flex: 1;
   min-width: 0;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
@@ -374,7 +402,7 @@ body.overlay-open {
 }
 
 /* ==========================================================================
-   Tabs & Quick Utility Bar
+   Two Tabs Only (全科目 / マイ試験日程)
    ========================================================================== */
 .toolbar-top {
   display: flex;
@@ -441,14 +469,8 @@ body.overlay-open {
   color: #92400e;
 }
 
-.quick-actions {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-
 /* ==========================================================================
-   Compact Search, Filter Button & Sort Toolbar
+   Search, Sort & First-Time Guide Toolbar
    ========================================================================== */
 .search-toolbar {
   background-color: var(--bg-surface);
@@ -513,17 +535,6 @@ body.overlay-open {
   justify-content: center;
 }
 
-.toolbar-controls-row {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 8px;
-}
-
-.filter-open-btn {
-  min-width: 120px;
-  font-weight: 700;
-}
-
 .filter-count-pill {
   display: inline-flex;
   align-items: center;
@@ -547,7 +558,7 @@ body.overlay-open {
   width: 100%;
   min-height: 44px;
   padding: 8px 16px;
-  font-size: 1rem;
+  font-size: 0.9375rem;
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-sm);
   background-color: var(--bg-canvas);
@@ -560,6 +571,45 @@ body.overlay-open {
   outline: none;
   border-color: var(--accent);
   background-color: var(--bg-surface);
+}
+
+/* First-time User Navigation Guide Bar */
+.menu-guide-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background-color: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.menu-guide-text {
+  overflow-wrap: anywhere;
+}
+
+.menu-guide-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-surface);
+  color: var(--accent);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.menu-guide-link:hover {
+  background-color: var(--accent-soft);
+  border-color: var(--accent-border);
 }
 
 /* Active Filter Summary Tags */
@@ -591,6 +641,8 @@ body.overlay-open {
   border-radius: 999px;
   font-size: 0.8125rem;
   font-weight: 600;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .active-tag-remove {
@@ -599,22 +651,37 @@ body.overlay-open {
   color: var(--accent);
   cursor: pointer;
   padding: 0 8px;
-  min-height: 28px;
+  min-height: 32px;
   font-size: 1rem;
   font-weight: 700;
   line-height: 1;
+  flex-shrink: 0;
 }
 
+.active-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-link-action,
 .btn-link-clear {
   border: none;
   background: transparent;
-  color: var(--text-muted);
   font-size: 0.8125rem;
   font-weight: 600;
   text-decoration: underline;
   cursor: pointer;
   padding: 8px;
   font-family: inherit;
+}
+
+.btn-link-action {
+  color: var(--accent);
+}
+
+.btn-link-clear {
+  color: var(--text-muted);
 }
 
 .btn-link-clear:hover {
@@ -633,7 +700,7 @@ body.overlay-open {
 }
 
 /* ==========================================================================
-   Schedule Card List & Date Group Headers
+   Schedule Card List & Date Group Headers (Scroll Performance Optimized)
    ========================================================================== */
 .schedule-section {
   display: flex;
@@ -651,6 +718,8 @@ body.overlay-open {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 420px;
 }
 
 .date-group-header {
@@ -661,6 +730,7 @@ body.overlay-open {
   background-color: var(--bg-subtle);
   border-left: 4px solid var(--text-primary);
   border-radius: var(--radius-sm);
+  gap: 16px;
 }
 
 .date-group-title {
@@ -669,6 +739,7 @@ body.overlay-open {
   font-weight: 700;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .date-group-count {
@@ -676,6 +747,7 @@ body.overlay-open {
   font-weight: 600;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
 
 .card-grid {
@@ -684,7 +756,7 @@ body.overlay-open {
   gap: 16px;
 }
 
-/* Individual Exam Card - Left-aligned hierarchy */
+/* Individual Exam Card - Strict Left Alignment & Safe Wrapping */
 .exam-card {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-light);
@@ -695,9 +767,11 @@ body.overlay-open {
   align-items: flex-start;
   gap: 16px;
   cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
   text-align: left;
   position: relative;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 184px;
 }
 
 .exam-card:hover {
@@ -741,6 +815,7 @@ body.overlay-open {
   align-items: flex-start;
   gap: 8px;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .card-datetime {
@@ -749,7 +824,9 @@ body.overlay-open {
   font-weight: 700;
   color: var(--accent);
   font-variant-numeric: tabular-nums;
-  line-height: 1.3;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .exam-card.card-cancelled .card-datetime {
@@ -800,6 +877,7 @@ body.overlay-open {
   font-weight: 700;
   line-height: 1.4;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
   word-break: break-word;
   text-align: left;
 }
@@ -808,7 +886,7 @@ body.overlay-open {
 .card-conflict-notice {
   width: 100%;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 8px;
   border-radius: var(--radius-sm);
@@ -817,9 +895,10 @@ body.overlay-open {
   color: var(--danger-text);
   font-size: 0.8125rem;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
-/* Card Row 3 & 4: Room/Campus & Instructor (Left-aligned, clean stacking) */
+/* Card Row 3 & 4: Room/Campus & Instructor */
 .card-details-list {
   width: 100%;
   display: flex;
@@ -850,6 +929,7 @@ body.overlay-open {
   font-size: 0.9375rem;
   font-weight: 600;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
   word-break: break-word;
   font-variant-numeric: tabular-nums;
 }
@@ -858,11 +938,17 @@ body.overlay-open {
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
+.load-more-sentinel {
+  width: 100%;
+  height: 16px;
+}
+
 /* ==========================================================================
-   Skeleton UI (Solid Shades Only)
+   Skeleton UI (Solid Shades Only, No Gradients)
    ========================================================================== */
 @keyframes skeletonPulse {
   0%,
@@ -921,16 +1007,18 @@ body.overlay-open {
   font-size: 1rem;
   font-weight: 700;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
 .empty-desc {
   margin: 8px 0 0;
   font-size: 0.875rem;
   color: var(--text-muted);
+  overflow-wrap: anywhere;
 }
 
 /* ==========================================================================
-   Left Slide-In Filter Drawer
+   Unified Left Slide-In Drawer (Hamburger Menu + Filter Controls)
    ========================================================================== */
 .drawer-backdrop {
   position: fixed;
@@ -939,7 +1027,7 @@ body.overlay-open {
   z-index: 60;
 }
 
-.filter-drawer {
+.app-drawer {
   position: fixed;
   top: 0;
   left: 0;
@@ -956,7 +1044,7 @@ body.overlay-open {
   transition: transform 0.22s ease;
 }
 
-.filter-drawer.is-open {
+.app-drawer.is-open {
   transform: translateX(0);
 }
 
@@ -968,6 +1056,7 @@ body.overlay-open {
   border-bottom: 1px solid var(--border-light);
   background-color: var(--bg-surface);
   flex-shrink: 0;
+  gap: 16px;
 }
 
 .drawer-title {
@@ -987,6 +1076,7 @@ body.overlay-open {
   display: inline-grid;
   place-items: center;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .icon-close-btn:hover {
@@ -1003,16 +1093,41 @@ body.overlay-open {
   gap: 24px;
 }
 
+.drawer-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  width: 100%;
+}
+
+.drawer-section-heading {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.drawer-divider {
+  width: 100%;
+  border: none;
+  border-top: 1px solid var(--border-light);
+  margin: 0;
+}
+
 .drawer-field {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
+  width: 100%;
 }
 
 .drawer-label-row {
   width: 100%;
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
@@ -1033,7 +1148,66 @@ body.overlay-open {
   width: 100%;
 }
 
-/* Chips */
+/* Drawer Navigation Menu Items (Unified Alignment & Line Icons) */
+.drawer-menu-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drawer-menu-item {
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 16px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 16px;
+  text-align: left;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.drawer-menu-item:hover {
+  background-color: var(--bg-subtle);
+  border-color: var(--border-medium);
+}
+
+.drawer-menu-icon {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.drawer-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.drawer-menu-item-danger {
+  color: var(--danger-text);
+}
+
+.drawer-menu-item-danger .drawer-menu-icon {
+  color: var(--danger-text);
+}
+
+.drawer-menu-item-danger:hover {
+  background-color: var(--danger-bg);
+  border-color: var(--danger-border);
+}
+
+/* Chips (Unified Height, Padding, Alignment & Constant Size on Select) */
 .chip-group {
   width: 100%;
   display: flex;
@@ -1042,6 +1216,9 @@ body.overlay-open {
 }
 
 .chip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 40px;
   padding: 8px 16px;
   border-radius: 999px;
@@ -1050,10 +1227,22 @@ body.overlay-open {
   color: var(--text-secondary);
   font-size: 0.875rem;
   font-weight: 600;
+  line-height: 1.25;
   font-family: inherit;
   cursor: pointer;
   transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
   font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+/* Unified Size for Exam Date Chips & Period Chips */
+.uniform-chip-group .chip-btn {
+  min-width: 112px;
+  min-height: 40px;
+  padding: 8px 16px;
 }
 
 .chip-btn:hover {
@@ -1092,6 +1281,7 @@ body.overlay-open {
   cursor: pointer;
   text-align: center;
   transition: background-color 0.12s ease, color 0.12s ease;
+  overflow-wrap: anywhere;
 }
 
 .segment-btn:hover {
@@ -1123,9 +1313,9 @@ body.overlay-open {
   font-weight: 700;
 }
 
-/* ==========================================================================
-   Modals (Detail Modal & Unsaved Confirmation Modal)
-   ========================================================================== */
+/* =======================================================================
+   Modals (Detail Modal, Unsaved Modal, Action Confirm Modal)
+   ======================================================================= */
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1133,7 +1323,8 @@ body.overlay-open {
   z-index: 80;
 }
 
-#unsavedModalBackdrop {
+#unsavedModalBackdrop,
+#actionModalBackdrop {
   z-index: 90;
 }
 
@@ -1190,6 +1381,7 @@ body.overlay-open {
   font-weight: 700;
   line-height: 1.4;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
@@ -1204,6 +1396,8 @@ body.overlay-open {
   font-size: 0.9375rem;
   color: var(--text-secondary);
   line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* Detail Definition List (Strict left alignment) */
@@ -1239,6 +1433,7 @@ body.overlay-open {
   font-size: 0.9375rem;
   font-weight: 600;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
   word-break: break-word;
   font-variant-numeric: tabular-nums;
 }
@@ -1268,6 +1463,7 @@ body.overlay-open {
   border-top: 1px solid var(--border-light);
   background-color: var(--bg-surface);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
@@ -1300,6 +1496,7 @@ body.overlay-open {
   transition: opacity 0.2s ease, transform 0.2s ease;
   z-index: 110;
   text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .toast.show {
@@ -1313,15 +1510,14 @@ body.overlay-open {
 @media (min-width: 768px) {
   .header-inner {
     padding: 16px 24px;
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
   }
 
-  .header-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+  .brand-title {
+    font-size: 1.125rem;
+  }
+
+  .brand-subtitle {
+    font-size: 0.8125rem;
   }
 
   .main-container {
@@ -1329,21 +1525,9 @@ body.overlay-open {
     gap: 24px;
   }
 
-  .toolbar-top {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-  }
-
   .view-tabs {
     display: inline-grid;
     min-width: 360px;
-  }
-
-  .quick-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
   }
 
   .search-main-row {
@@ -1355,15 +1539,9 @@ body.overlay-open {
     flex: 1 1 auto;
   }
 
-  .toolbar-controls-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-  }
-
   .sort-wrap {
-    width: 240px;
+    width: 260px;
+    flex-shrink: 0;
   }
 
   .card-grid {
@@ -1396,7 +1574,7 @@ body.overlay-open {
 
   .no-print,
   .app-header,
-  .filter-drawer,
+  .app-drawer,
   .drawer-backdrop,
   .modal-dialog,
   .modal-backdrop,

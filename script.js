@@ -1,11 +1,10 @@
 /**
  * 定期試験日程データベース (script.js)
- * - スマートフォン最優先のレスポンシブカードUI
- * - 左スライドイン絞り込みドロワ（学科・校舎・試験日・曜日・時限・追評価実施有無）
- * - 未適用変更時の確認モーダル（変更を適用して絞り込む / 変更を破棄して閉じる）
- * - 科目詳細モーダル（全10項目表示・フォーカストラップ・キーボード対応）
- * - 実処理と連動する単色濃淡スケルトンUI
- * - IndexedDB（フォールバック: localStorage）によるローカル永続化・重複検出・ICS/PDF出力維持
+ * - ハンバーガーメニュー統合型・左スライドインドロワ（絞り込み条件＋データ管理操作）
+ * - 初期並び替え：科目名順（あいうえお順 / Intl.Collator('ja') 安定ソート）
+ * - 確認モーダル付き破壊的・置換操作（マイ試験日程をすべて解除 / 保存データの全削除 / サンプル読込）
+ * - スクロール性能最適化（印刷用テーブルのオンデマンド生成・段階描画・ピン留め差分DOM更新）
+ * - 実処理閾値連動の単色濃淡スケルトンUI
  */
 
 (() => {
@@ -128,17 +127,23 @@
   };
 
   // =========================================================================
-  // 2. Normalization & Excel Row Parsing Utilities
+  // 2. Normalization, Japanese Collator & Excel Row Parsing
   // =========================================================================
   const DAY_ORDER = { '月': 1, '火': 2, '水': 3, '木': 4, '金': 5, '土': 6, '日': 7 };
   const ALL_WEEKDAYS = ['月', '火', '水', '木', '金', '土', '日'];
+  const JA_COLLATOR = new Intl.Collator('ja', { numeric: true, sensitivity: 'base' });
 
   function normalizeText(value) {
     if (value === null || value === undefined) return '';
     return String(value)
         .normalize('NFKC')
         .toLowerCase()
-        .replace(/[\s ]+/g, '');
+        .replace(/[\s\u3000]+/g, '');
+  }
+
+  function makeSubjectSortKey(value) {
+    if (value === null || value === undefined) return '';
+    return String(value).normalize('NFKC').trim();
   }
 
   function cleanCell(value) {
@@ -275,7 +280,7 @@
         uid: `${index}_${c0}_${c2}`,
         stableKey,
         no: Number.isNaN(noNum) ? c0 : noNum,
-        noSort: Number.isNaN(noNum) ? Number.MAX_SAFE_INTEGER : noNum,
+        noSort: Number.isNaN(noNum) ? index + 100000 : noNum,
         department: c1 || '未分類',
         classCode: c2,
         regularDay: c3,
@@ -284,6 +289,7 @@
         regularSortKey,
         subject: c5,
         subjectNorm: normalizeText(c5),
+        subjectSortKey: makeSubjectSortKey(c5),
         instructor: c6,
         campus: c7,
         examRaw: c8,
@@ -311,10 +317,10 @@
     return {
       query: '',
       dept: '',
-      campus: '', // Single-select chip
+      campus: '', // Single-select chip (preserved)
       examDates: new Set(), // Multi-select chips
-      regDays: new Set(), // Multi-select chips
-      regPeriods: new Set(), // Multi-select chips
+      regDays: new Set(), // Multi-select chips (regularDay)
+      regPeriods: new Set(), // Multi-select chips (regularPeriod)
       status: '' // Segmented control: '' | '実施する' | '実施しない'
     };
   }
@@ -331,6 +337,8 @@
     };
   }
 
+  const RENDER_CHUNK_SIZE = 60;
+
   const state = {
     records: [],
     meta: null,
@@ -339,15 +347,21 @@
     viewMode: 'all', // 'all' | 'pinned'
     appliedFilters: createEmptyFilters(),
     draftFilters: createEmptyFilters(),
-    sortBy: 'examDate_asc',
+    sortBy: 'subject_asc', // Default: Subject Name (Japanese Gojuon Order)
     availableOptions: {
-      depts: [], // [{ value, count }]
-      campuses: [], // [{ value, count }]
-      examDates: [], // [{ value, count, sortKey }]
-      regPeriods: [] // [string]
+      depts: [],
+      campuses: [],
+      examDates: [],
+      regPeriods: []
     },
+    currentRenderedRecords: [],
+    renderedCount: 0,
+    lastDateGroupSection: null,
+    lastDateGroupKey: null,
     isDrawerOpen: false,
     isUnsavedModalOpen: false,
+    isActionModalOpen: false,
+    pendingConfirmAction: null,
     activeDetailRecord: null,
     lastFocusedElement: null
   };
@@ -357,13 +371,14 @@
   // =========================================================================
   const dom = {
     globalDropOverlay: document.getElementById('globalDropOverlay'),
+    openMenuDrawerBtn: document.getElementById('openMenuDrawerBtn'),
+    activeFilterBadge: document.getElementById('activeFilterBadge'),
     dbMetaText: document.getElementById('dbMetaText'),
+
     uploadPanel: document.getElementById('uploadPanel'),
-    toggleUploadBtn: document.getElementById('toggleUploadBtn'),
-    loadSampleBtn: document.getElementById('loadSampleBtn'),
-    printBtn: document.getElementById('printBtn'),
     dropzone: document.getElementById('dropzone'),
     fileInput: document.getElementById('fileInput'),
+    inlineSampleBtn: document.getElementById('inlineSampleBtn'),
 
     errorBanner: document.getElementById('errorBanner'),
     errorMessage: document.getElementById('errorMessage'),
@@ -376,24 +391,23 @@
     countAll: document.getElementById('countAll'),
     countPinned: document.getElementById('countPinned'),
 
-    exportIcsBtn: document.getElementById('exportIcsBtn'),
-    clearPinsBtn: document.getElementById('clearPinsBtn'),
-    resetDbBtn: document.getElementById('resetDbBtn'),
-
     searchInput: document.getElementById('searchInput'),
     clearSearchBtn: document.getElementById('clearSearchBtn'),
-    openFilterDrawerBtn: document.getElementById('openFilterDrawerBtn'),
-    activeFilterBadge: document.getElementById('activeFilterBadge'),
     sortSelect: document.getElementById('sortSelect'),
+
+    menuGuideBar: document.getElementById('menuGuideBar'),
+    guideOpenMenuBtn: document.getElementById('guideOpenMenuBtn'),
 
     activeFiltersBar: document.getElementById('activeFiltersBar'),
     activeFilterTags: document.getElementById('activeFilterTags'),
+    editFiltersFromBarBtn: document.getElementById('editFiltersFromBarBtn'),
     quickClearAllFiltersBtn: document.getElementById('quickClearAllFiltersBtn'),
     resultStats: document.getElementById('resultStats'),
 
     scheduleListSection: document.getElementById('scheduleListSection'),
     skeletonGrid: document.getElementById('skeletonGrid'),
     cardListContainer: document.getElementById('cardListContainer'),
+    loadMoreSentinel: document.getElementById('loadMoreSentinel'),
     emptyState: document.getElementById('emptyState'),
     emptyTitle: document.getElementById('emptyTitle'),
     emptyDesc: document.getElementById('emptyDesc'),
@@ -402,10 +416,13 @@
     printMeta: document.getElementById('printMeta'),
     printTableBody: document.getElementById('printTableBody'),
 
-    // Left Filter Drawer
-    filterDrawerBackdrop: document.getElementById('filterDrawerBackdrop'),
-    filterDrawer: document.getElementById('filterDrawer'),
-    closeFilterDrawerBtn: document.getElementById('closeFilterDrawerBtn'),
+    // Unified Left Slide-In Drawer
+    appDrawerBackdrop: document.getElementById('appDrawerBackdrop'),
+    appDrawer: document.getElementById('appDrawer'),
+    closeAppDrawerBtn: document.getElementById('closeAppDrawerBtn'),
+    appDrawerBody: document.getElementById('appDrawerBody'),
+    drawerFilterSection: document.getElementById('drawerFilterSection'),
+
     drawerFilterDept: document.getElementById('drawerFilterDept'),
     drawerCampusChips: document.getElementById('drawerCampusChips'),
     drawerExamDateChips: document.getElementById('drawerExamDateChips'),
@@ -415,11 +432,27 @@
     drawerResetBtn: document.getElementById('drawerResetBtn'),
     drawerApplyBtn: document.getElementById('drawerApplyBtn'),
 
+    // Drawer Management Menu Buttons
+    menuExcelUploadBtn: document.getElementById('menuExcelUploadBtn'),
+    menuLoadSampleBtn: document.getElementById('menuLoadSampleBtn'),
+    menuExportIcsBtn: document.getElementById('menuExportIcsBtn'),
+    menuPrintBtn: document.getElementById('menuPrintBtn'),
+    menuClearPinsBtn: document.getElementById('menuClearPinsBtn'),
+    menuResetDbBtn: document.getElementById('menuResetDbBtn'),
+
     // Unsaved Changes Modal
     unsavedModalBackdrop: document.getElementById('unsavedModalBackdrop'),
     unsavedConfirmModal: document.getElementById('unsavedConfirmModal'),
     unsavedApplyBtn: document.getElementById('unsavedApplyBtn'),
     unsavedDiscardBtn: document.getElementById('unsavedDiscardBtn'),
+
+    // Destructive / Overwrite Confirmation Modal
+    actionModalBackdrop: document.getElementById('actionModalBackdrop'),
+    actionConfirmModal: document.getElementById('actionConfirmModal'),
+    actionModalTitle: document.getElementById('actionModalTitle'),
+    actionModalDesc: document.getElementById('actionModalDesc'),
+    actionModalConfirmBtn: document.getElementById('actionModalConfirmBtn'),
+    actionModalCancelBtn: document.getElementById('actionModalCancelBtn'),
 
     // Subject Detail Modal
     detailModalBackdrop: document.getElementById('detailModalBackdrop'),
@@ -456,10 +489,6 @@
     dom.errorMessage.textContent = '';
   }
 
-  /**
-   * 実際の非同期処理・検索デバウンス・再描画フレームに連動したスケルトン制御
-   * 人為的な遅延は追加しない
-   */
   let activeLoadingTokens = 0;
   function beginSkeletonLoading() {
     activeLoadingTokens += 1;
@@ -480,7 +509,10 @@
 
   function syncBodyScrollLock() {
     const hasOpenOverlay =
-        state.isDrawerOpen || state.isUnsavedModalOpen || Boolean(state.activeDetailRecord);
+        state.isDrawerOpen ||
+        state.isUnsavedModalOpen ||
+        state.isActionModalOpen ||
+        Boolean(state.activeDetailRecord);
     document.body.classList.toggle('overlay-open', hasOpenOverlay);
   }
 
@@ -518,7 +550,7 @@
   }
 
   // =========================================================================
-  // 7. Excel File Ingestion (with Skeleton on Slow Network / File Read)
+  // 7. Excel File Ingestion & Sample Dataset
   // =========================================================================
   function readFileAsArrayBuffer(file) {
     if (typeof file.arrayBuffer === 'function') {
@@ -593,7 +625,7 @@
     }
   }
 
-  async function loadSampleDataset() {
+  async function executeLoadSampleDataset() {
     hideError();
     beginSkeletonLoading();
     try {
@@ -618,6 +650,21 @@
     } finally {
       endSkeletonLoading();
       renderCurrentView();
+    }
+  }
+
+  function requestLoadSampleDataset() {
+    if (state.records.length > 0) {
+      const currentName = state.meta?.fileName || '現在の試験データ';
+      openActionConfirmModal({
+        title: 'サンプルデータで現在のデータを置き換えますか？',
+        message: `現在読み込まれている「${currentName}」（${state.records.length}件）が、サンプルデータ（37件）に置き換わります。※マイ試験日程の登録情報は保持されます。`,
+        confirmLabel: '置き換えて読み込む',
+        confirmVariant: 'primary',
+        onConfirm: executeLoadSampleDataset
+      });
+    } else {
+      executeLoadSampleDataset();
     }
   }
 
@@ -649,11 +696,11 @@
     });
 
     state.availableOptions.depts = [...depts.entries()]
-        .sort((a, b) => a[0].localeCompare(b[0], 'ja'))
+        .sort((a, b) => JA_COLLATOR.compare(a[0], b[0]))
         .map(([value, count]) => ({ value, count }));
 
     state.availableOptions.campuses = [...campuses.entries()]
-        .sort((a, b) => a[0].localeCompare(b[0], 'ja'))
+        .sort((a, b) => JA_COLLATOR.compare(a[0], b[0]))
         .map(([value, count]) => ({ value, count }));
 
     state.availableOptions.examDates = [...examDates.entries()]
@@ -661,10 +708,9 @@
         .map(([value, info]) => ({ value, count: info.count, sortKey: info.sortKey }));
 
     state.availableOptions.regPeriods = [...regPeriods].sort((a, b) =>
-        a.localeCompare(b, 'ja', { numeric: true })
+        JA_COLLATOR.compare(a, b)
     );
 
-    // Prune invalid selections if dataset changed
     if (state.appliedFilters.dept && !depts.has(state.appliedFilters.dept)) {
       state.appliedFilters.dept = '';
     }
@@ -714,7 +760,7 @@
   }
 
   // =========================================================================
-  // 9. Left Filter Drawer Rendering & State Comparison
+  // 9. Unified Left Slide-In Drawer Rendering & State Comparison
   // =========================================================================
   function setsAreEqual(setA, setB) {
     if (setA.size !== setB.size) return false;
@@ -749,7 +795,7 @@
     });
     dom.drawerFilterDept.value = draft.dept;
 
-    // 2. 校舎 Chips (Single-select)
+    // 2. 校舎 Chips (Single-select preserved)
     dom.drawerCampusChips.innerHTML = '';
     if (state.availableOptions.campuses.length === 0) {
       dom.drawerCampusChips.innerHTML = '<span class="drawer-hint">データ読込後に表示されます</span>';
@@ -769,7 +815,7 @@
       });
     }
 
-    // 3. 試験日 Chips (Multi-select)
+    // 3. 試験日 Chips (Multi-select, Unified Size)
     dom.drawerExamDateChips.innerHTML = '';
     if (state.availableOptions.examDates.length === 0) {
       dom.drawerExamDateChips.innerHTML = '<span class="drawer-hint">データ読込後に表示されます</span>';
@@ -813,7 +859,7 @@
       dom.drawerRegDayChips.appendChild(btn);
     });
 
-    // 5. 通常授業の時限 Chips (Multi-select)
+    // 5. 通常授業の時限 Chips (Multi-select, Unified Size)
     dom.drawerRegPeriodChips.innerHTML = '';
     if (state.availableOptions.regPeriods.length === 0) {
       dom.drawerRegPeriodChips.innerHTML = '<span class="drawer-hint">データ読込後に表示されます</span>';
@@ -847,29 +893,30 @@
     });
   }
 
-  function openFilterDrawer() {
-    state.lastFocusedElement = document.activeElement;
+  function openAppDrawer(triggerEl) {
+    state.lastFocusedElement = triggerEl || document.activeElement;
     state.draftFilters = cloneFilters(state.appliedFilters);
     renderDrawerControls();
 
     state.isDrawerOpen = true;
-    dom.openFilterDrawerBtn.setAttribute('aria-expanded', 'true');
-    dom.filterDrawerBackdrop.classList.remove('hidden');
-    dom.filterDrawer.classList.remove('hidden');
+    dom.openMenuDrawerBtn.setAttribute('aria-expanded', 'true');
+    dom.appDrawerBackdrop.classList.remove('hidden');
+    dom.appDrawer.classList.remove('hidden');
     syncBodyScrollLock();
 
     requestAnimationFrame(() => {
-      dom.filterDrawer.classList.add('is-open');
-      dom.closeFilterDrawerBtn.focus();
+      dom.appDrawer.classList.add('is-open');
+      dom.appDrawerBody.scrollTop = 0;
+      dom.closeAppDrawerBtn.focus();
     });
   }
 
-  function closeFilterDrawerImmediate() {
+  function closeAppDrawerImmediate() {
     state.isDrawerOpen = false;
-    dom.openFilterDrawerBtn.setAttribute('aria-expanded', 'false');
-    dom.filterDrawer.classList.remove('is-open');
-    dom.filterDrawerBackdrop.classList.add('hidden');
-    dom.filterDrawer.classList.add('hidden');
+    dom.openMenuDrawerBtn.setAttribute('aria-expanded', 'false');
+    dom.appDrawer.classList.remove('is-open');
+    dom.appDrawerBackdrop.classList.add('hidden');
+    dom.appDrawer.classList.add('hidden');
     syncBodyScrollLock();
 
     if (state.lastFocusedElement && typeof state.lastFocusedElement.focus === 'function') {
@@ -877,36 +924,29 @@
     }
   }
 
-  function requestCloseFilterDrawer() {
+  function requestCloseAppDrawer() {
     if (hasUnsavedDrawerChanges()) {
       openUnsavedConfirmModal();
     } else {
-      closeFilterDrawerImmediate();
+      closeAppDrawerImmediate();
     }
   }
 
   function applyDraftFiltersAndClose() {
     state.appliedFilters = cloneFilters(state.draftFilters);
     closeUnsavedConfirmModal();
-    closeFilterDrawerImmediate();
-
-    beginSkeletonLoading();
-    requestAnimationFrame(() => {
-      renderCurrentView();
-      requestAnimationFrame(() => {
-        endSkeletonLoading();
-      });
-    });
+    closeAppDrawerImmediate();
+    renderCurrentViewWithThresholdSkeleton();
   }
 
   function discardDraftFiltersAndClose() {
     state.draftFilters = cloneFilters(state.appliedFilters);
     closeUnsavedConfirmModal();
-    closeFilterDrawerImmediate();
+    closeAppDrawerImmediate();
   }
 
   // =========================================================================
-  // 10. Unsaved Changes Confirmation Modal
+  // 10. Confirmation Modals (Unsaved Filters & Destructive/Overwrite Actions)
   // =========================================================================
   function openUnsavedConfirmModal() {
     state.isUnsavedModalOpen = true;
@@ -922,7 +962,35 @@
     dom.unsavedConfirmModal.classList.add('hidden');
     syncBodyScrollLock();
     if (state.isDrawerOpen) {
-      dom.closeFilterDrawerBtn.focus();
+      dom.closeAppDrawerBtn.focus();
+    }
+  }
+
+  function openActionConfirmModal({ title, message, confirmLabel, confirmVariant = 'danger', onConfirm }) {
+    state.pendingConfirmAction = onConfirm;
+    state.isActionModalOpen = true;
+    dom.actionModalTitle.textContent = title;
+    dom.actionModalDesc.textContent = message;
+    dom.actionModalConfirmBtn.textContent = confirmLabel || '実行する';
+    dom.actionModalConfirmBtn.className =
+        confirmVariant === 'primary' ? 'btn btn-primary btn-block' : 'btn btn-danger btn-block';
+
+    dom.actionModalBackdrop.classList.remove('hidden');
+    dom.actionConfirmModal.classList.remove('hidden');
+    syncBodyScrollLock();
+    dom.actionModalCancelBtn.focus();
+  }
+
+  function closeActionConfirmModal() {
+    state.isActionModalOpen = false;
+    state.pendingConfirmAction = null;
+    dom.actionModalBackdrop.classList.add('hidden');
+    dom.actionConfirmModal.classList.add('hidden');
+    syncBodyScrollLock();
+    if (state.isDrawerOpen) {
+      dom.closeAppDrawerBtn.focus();
+    } else if (state.lastFocusedElement && typeof state.lastFocusedElement.focus === 'function') {
+      state.lastFocusedElement.focus();
     }
   }
 
@@ -992,6 +1060,7 @@
     }
 
     dom.activeFilterTags.innerHTML = '';
+    const fragment = document.createDocumentFragment();
     tags.forEach((tag) => {
       const span = document.createElement('span');
       span.className = 'active-tag';
@@ -1004,22 +1073,17 @@
       btn.textContent = '×';
       btn.addEventListener('click', () => {
         tag.onRemove();
-        beginSkeletonLoading();
-        requestAnimationFrame(() => {
-          renderCurrentView();
-          requestAnimationFrame(() => {
-            endSkeletonLoading();
-          });
-        });
+        renderCurrentViewWithThresholdSkeleton();
       });
 
       span.appendChild(btn);
-      dom.activeFilterTags.appendChild(span);
+      fragment.appendChild(span);
     });
+    dom.activeFilterTags.appendChild(fragment);
   }
 
   // =========================================================================
-  // 12. Filtering & Sorting Pipeline
+  // 12. Filtering & Sorting Pipeline (Non-Destructive, Japanese Gojuon Order)
   // =========================================================================
   function getFilteredAndSortedRecords() {
     const f = state.appliedFilters;
@@ -1056,31 +1120,36 @@
     const [field, dir] = state.sortBy.split('_');
     const sign = dir === 'desc' ? -1 : 1;
 
+    // Sort a shallow-filtered array without mutating original state.records
     filtered.sort((a, b) => {
       let cmp = 0;
       switch (field) {
+        case 'subject': {
+          const keyA = a.subjectSortKey || makeSubjectSortKey(a.subject);
+          const keyB = b.subjectSortKey || makeSubjectSortKey(b.subject);
+          cmp = JA_COLLATOR.compare(keyA, keyB);
+          break;
+        }
         case 'examDate':
           cmp = a.examSortKey - b.examSortKey;
           break;
-        case 'subject':
-          cmp = a.subjectNorm.localeCompare(b.subjectNorm, 'ja');
-          break;
         case 'dept':
-          cmp = a.department.localeCompare(b.department, 'ja') || a.classCode.localeCompare(b.classCode, 'ja');
+          cmp = JA_COLLATOR.compare(a.department, b.department) || JA_COLLATOR.compare(a.classCode, b.classCode);
           break;
         case 'regular':
           cmp = a.regularSortKey - b.regularSortKey;
           break;
         case 'room':
-          cmp = a.room.localeCompare(b.room, 'ja', { numeric: true });
+          cmp = JA_COLLATOR.compare(a.room, b.room);
           break;
         case 'no':
         default:
           cmp = a.noSort - b.noSort;
           break;
       }
+      // Stable tie-breaker using original Excel row order
       if (cmp === 0) {
-        cmp = a.noSort - b.noSort;
+        return a.noSort - b.noSort;
       }
       return cmp * sign;
     });
@@ -1089,7 +1158,7 @@
   }
 
   // =========================================================================
-  // 13. Rendering Cards, Date Groups & Print Table
+  // 13. Progressive Card Rendering, Differential Pin Updates & On-Demand Print
   // =========================================================================
   function escapeHtml(str) {
     return String(str)
@@ -1102,8 +1171,8 @@
 
   function createStarSvg(filled) {
     return filled
-        ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`
-        : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`;
+        ? `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`
+        : `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`;
   }
 
   function createExamCardElement(rec) {
@@ -1113,6 +1182,8 @@
 
     const card = document.createElement('article');
     card.className = 'exam-card';
+    card.dataset.uid = rec.uid;
+    card.dataset.stableKey = rec.stableKey;
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
     card.setAttribute('aria-label', `${rec.subject} の詳細を表示`);
@@ -1176,14 +1247,12 @@
       </div>
     `;
 
-    // Star button click (prevent opening detail modal)
     const pinBtn = card.querySelector('.pin-btn');
     pinBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       togglePin(rec.stableKey);
     });
 
-    // Card click or Enter/Space opens Subject Detail Modal
     card.addEventListener('click', () => {
       openDetailModal(rec, card);
     });
@@ -1198,71 +1267,104 @@
     return card;
   }
 
+  function appendNextCardChunk() {
+    const records = state.currentRenderedRecords;
+    if (state.renderedCount >= records.length) {
+      dom.loadMoreSentinel.classList.add('hidden');
+      return;
+    }
+
+    const slice = records.slice(state.renderedCount, state.renderedCount + RENDER_CHUNK_SIZE);
+    const isDateSorted = state.sortBy === 'examDate_asc' || state.sortBy === 'examDate_desc';
+    const fragment = document.createDocumentFragment();
+
+    if (isDateSorted) {
+      slice.forEach((rec) => {
+        const dateLabel = rec.examDateLabel;
+        if (state.lastDateGroupKey !== dateLabel || !state.lastDateGroupSection) {
+          const totalInGroup = records.filter((r) => r.examDateLabel === dateLabel).length;
+          const section = document.createElement('section');
+          section.className = 'date-group-section';
+
+          const header = document.createElement('div');
+          header.className = 'date-group-header';
+          header.innerHTML = `
+            <h2 class="date-group-title">${escapeHtml(dateLabel)}</h2>
+            <span class="date-group-count">${totalInGroup} 件</span>
+          `;
+
+          const grid = document.createElement('div');
+          grid.className = 'card-grid';
+          section.appendChild(header);
+          section.appendChild(grid);
+
+          fragment.appendChild(section);
+          state.lastDateGroupSection = grid;
+          state.lastDateGroupKey = dateLabel;
+        }
+        state.lastDateGroupSection.appendChild(createExamCardElement(rec));
+      });
+    } else {
+      let grid = dom.cardListContainer.querySelector(':scope > .card-grid');
+      if (!grid) {
+        grid = document.createElement('div');
+        grid.className = 'card-grid';
+        fragment.appendChild(grid);
+      }
+      slice.forEach((rec) => {
+        grid.appendChild(createExamCardElement(rec));
+      });
+    }
+
+    dom.cardListContainer.appendChild(fragment);
+    state.renderedCount += slice.length;
+
+    if (state.renderedCount < records.length) {
+      dom.loadMoreSentinel.classList.remove('hidden');
+    } else {
+      dom.loadMoreSentinel.classList.add('hidden');
+    }
+  }
+
   function renderCards(records) {
     dom.cardListContainer.innerHTML = '';
+    state.currentRenderedRecords = records;
+    state.renderedCount = 0;
+    state.lastDateGroupSection = null;
+    state.lastDateGroupKey = null;
 
     if (records.length === 0) {
+      dom.loadMoreSentinel.classList.add('hidden');
       dom.emptyState.classList.remove('hidden');
       if (state.records.length === 0) {
         dom.emptyTitle.textContent = 'データがありません';
-        dom.emptyDesc.textContent = '上部のエリアからExcelファイルを読み込むか、「サンプル読込」を押してください。';
+        dom.emptyDesc.textContent = '上部のエリアからExcelファイルを読み込むか、「サンプルデータを読み込む」を押してください。';
       } else if (state.viewMode === 'pinned') {
         dom.emptyTitle.textContent = 'マイ試験日程に登録された科目がありません';
         dom.emptyDesc.textContent = '「全科目」タブで履修している科目の星アイコンを押すと登録できます。';
       } else {
         dom.emptyTitle.textContent = '条件に一致する試験が見つかりませんでした';
-        dom.emptyDesc.textContent = '検索キーワードや絞り込み条件を変更してみてください。';
+        dom.emptyDesc.textContent = '検索キーワードやメニュー内の絞り込み条件を変更してみてください。';
       }
       return;
     }
 
     dom.emptyState.classList.add('hidden');
-    const isDateSorted = state.sortBy === 'examDate_asc' || state.sortBy === 'examDate_desc';
-
-    if (isDateSorted) {
-      const groups = new Map();
-      records.forEach((rec) => {
-        const groupKey = rec.examDateLabel;
-        if (!groups.has(groupKey)) groups.set(groupKey, []);
-        groups.get(groupKey).push(rec);
-      });
-
-      const fragment = document.createDocumentFragment();
-
-      groups.forEach((groupRecords, dateLabel) => {
-        const section = document.createElement('section');
-        section.className = 'date-group-section';
-
-        const header = document.createElement('div');
-        header.className = 'date-group-header';
-        header.innerHTML = `
-          <h2 class="date-group-title">${escapeHtml(dateLabel)}</h2>
-          <span class="date-group-count">${groupRecords.length} 件</span>
-        `;
-
-        const grid = document.createElement('div');
-        grid.className = 'card-grid';
-        groupRecords.forEach((rec) => {
-          grid.appendChild(createExamCardElement(rec));
-        });
-
-        section.appendChild(header);
-        section.appendChild(grid);
-        fragment.appendChild(section);
-      });
-
-      dom.cardListContainer.appendChild(fragment);
-    } else {
-      const grid = document.createElement('div');
-      grid.className = 'card-grid';
-      records.forEach((rec) => {
-        grid.appendChild(createExamCardElement(rec));
-      });
-      dom.cardListContainer.appendChild(grid);
-    }
+    appendNextCardChunk();
   }
 
-  function renderPrintTable(records) {
+  /**
+   * 印刷・PDF出力時のみオンデマンドでテーブルを生成（通常スクロール時のDOM負荷を削減）
+   */
+  function preparePrintTable() {
+    const records = state.currentRenderedRecords.length > 0
+        ? state.currentRenderedRecords
+        : getFilteredAndSortedRecords();
+
+    const modeLabel = state.viewMode === 'pinned' ? 'マイ定期試験日程表' : '定期試験日程一覧';
+    dom.printTitle.textContent = modeLabel;
+    dom.printMeta.textContent = `出力日時: ${new Date().toLocaleString('ja-JP')} ／ 表示件数: ${records.length}件`;
+
     dom.printTableBody.innerHTML = '';
     const fragment = document.createDocumentFragment();
 
@@ -1304,16 +1406,24 @@
   function renderCurrentView() {
     const filtered = getFilteredAndSortedRecords();
     dom.resultStats.innerHTML = `表示件数: <strong>${filtered.length}</strong> / 全 ${state.records.length} 件`;
-
     renderActiveFilterSummary();
-
-    const modeLabel =
-        state.viewMode === 'pinned' ? 'マイ定期試験日程表' : '定期試験日程一覧';
-    dom.printTitle.textContent = modeLabel;
-    dom.printMeta.textContent = `出力日時: ${new Date().toLocaleString('ja-JP')} ／ 表示件数: ${filtered.length}件`;
-
     renderCards(filtered);
-    renderPrintTable(filtered);
+  }
+
+  /**
+   * 処理時間が閾値（80ms）を超える規模の場合のみスケルトンを表示し、
+   * 瞬時に完了する通常操作ではチラつき・待ち時間を発生させない
+   */
+  function renderCurrentViewWithThresholdSkeleton() {
+    if (state.records.length >= 400) {
+      beginSkeletonLoading();
+      requestAnimationFrame(() => {
+        renderCurrentView();
+        endSkeletonLoading();
+      });
+    } else {
+      renderCurrentView();
+    }
   }
 
   function refreshAllUI() {
@@ -1432,8 +1542,51 @@
   }
 
   // =========================================================================
-  // 15. Pinning & ICS Calendar Export
+  // 15. Differential Pinning & ICS Calendar Export
   // =========================================================================
+  function syncRenderedCardPinAndConflictStates() {
+    const cards = dom.cardListContainer.querySelectorAll('.exam-card');
+    cards.forEach((card) => {
+      const uid = card.dataset.uid;
+      const key = card.dataset.stableKey;
+      const isPinned = state.pinnedKeys.has(key);
+      const isConflict = state.conflictUids.has(uid);
+
+      card.classList.toggle('card-pinned', isPinned);
+      card.classList.toggle('card-conflict', isConflict);
+
+      const pinBtn = card.querySelector('.pin-btn');
+      if (pinBtn) {
+        pinBtn.classList.toggle('pinned', isPinned);
+        pinBtn.setAttribute('aria-pressed', isPinned ? 'true' : 'false');
+        pinBtn.setAttribute('aria-label', isPinned ? 'マイ試験日程から解除' : 'マイ試験日程に登録');
+        pinBtn.title = isPinned ? 'マイ試験日程から解除' : 'マイ試験日程に登録';
+        pinBtn.innerHTML = createStarSvg(isPinned);
+      }
+
+      const existingNotice = card.querySelector('.card-conflict-notice');
+      if (isConflict && !existingNotice) {
+        const notice = document.createElement('div');
+        notice.className = 'card-conflict-notice';
+        notice.setAttribute('role', 'status');
+        notice.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+          <span>試験日時が他の登録科目と重複しています</span>
+        `;
+        const detailsList = card.querySelector('.card-details-list');
+        if (detailsList) {
+          card.insertBefore(notice, detailsList);
+        }
+      } else if (!isConflict && existingNotice) {
+        existingNotice.remove();
+      }
+    });
+  }
+
   async function togglePin(stableKey) {
     if (!stableKey) return;
     if (state.pinnedKeys.has(stableKey)) {
@@ -1445,7 +1598,14 @@
     detectPinnedConflicts();
     updateHeaderAndCounts();
     syncDetailModalPinButton();
-    renderCurrentView();
+
+    if (state.viewMode === 'pinned') {
+      // Remove unpinned item cleanly in My Exam Schedule view
+      renderCurrentView();
+    } else {
+      // Differential DOM update without rebuilding list or resetting scroll
+      syncRenderedCardPinAndConflictStates();
+    }
   }
 
   function exportPinnedToICS() {
@@ -1514,7 +1674,7 @@
   }
 
   // =========================================================================
-  // 16. Event Listeners
+  // 16. Event Listeners & Progressive Scroll Observer
   // =========================================================================
   function extractDroppedFile(dataTransfer) {
     if (!dataTransfer) return null;
@@ -1531,13 +1691,23 @@
     return null;
   }
 
+  function setupProgressiveScrollObserver() {
+    if (!('IntersectionObserver' in window)) return;
+    const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting && state.renderedCount < state.currentRenderedRecords.length) {
+              appendNextCardChunk();
+            }
+          });
+        },
+        { rootMargin: '320px 0px' }
+    );
+    observer.observe(dom.loadMoreSentinel);
+  }
+
   function bindEvents() {
     dom.closeErrorBtn.addEventListener('click', hideError);
-
-    // Upload panel toggle
-    dom.toggleUploadBtn.addEventListener('click', () => {
-      dom.uploadPanel.classList.toggle('hidden');
-    });
 
     // File input change
     dom.fileInput.addEventListener('change', (e) => {
@@ -1547,6 +1717,9 @@
         e.target.value = '';
       }
     });
+
+    // Inline Sample button inside initial dropzone
+    dom.inlineSampleBtn.addEventListener('click', requestLoadSampleDataset);
 
     // Dropzone direct drag-drop
     ['dragenter', 'dragover'].forEach((evtName) => {
@@ -1605,9 +1778,8 @@
       if (file) handleExcelFile(file);
     });
 
-    // Sample data & Print
-    dom.loadSampleBtn.addEventListener('click', loadSampleDataset);
-    dom.printBtn.addEventListener('click', () => window.print());
+    // Prepare print table right before browser print
+    window.addEventListener('beforeprint', preparePrintTable);
 
     // Two View Tabs (全科目 / マイ試験日程)
     dom.tabButtons.forEach((btn) => {
@@ -1623,35 +1795,21 @@
       });
     });
 
-    // Search input with real-time debounce & skeleton state
+    // Search input with real-time debounce (keeps existing list visible to avoid layout jumps)
     let searchDebounce = null;
-    let isSearchDebouncing = false;
     dom.searchInput.addEventListener('input', (e) => {
       const val = e.target.value;
       dom.clearSearchBtn.classList.toggle('hidden', val.length === 0);
 
-      if (!isSearchDebouncing) {
-        isSearchDebouncing = true;
-        beginSkeletonLoading();
-      }
-
       clearTimeout(searchDebounce);
       searchDebounce = setTimeout(() => {
         state.appliedFilters.query = val;
-        renderCurrentView();
-        requestAnimationFrame(() => {
-          isSearchDebouncing = false;
-          endSkeletonLoading();
-        });
-      }, 160);
+        renderCurrentViewWithThresholdSkeleton();
+      }, 150);
     });
 
     dom.clearSearchBtn.addEventListener('click', () => {
       clearTimeout(searchDebounce);
-      if (isSearchDebouncing) {
-        isSearchDebouncing = false;
-        endSkeletonLoading();
-      }
       dom.searchInput.value = '';
       dom.clearSearchBtn.classList.add('hidden');
       state.appliedFilters.query = '';
@@ -1664,16 +1822,14 @@
       const currentQuery = state.appliedFilters.query;
       state.appliedFilters = createEmptyFilters();
       state.appliedFilters.query = currentQuery;
-
-      beginSkeletonLoading();
-      requestAnimationFrame(() => {
-        renderCurrentView();
-        requestAnimationFrame(() => {
-          endSkeletonLoading();
-        });
-      });
+      renderCurrentViewWithThresholdSkeleton();
       showToast('絞り込み条件をすべて解除しました');
     });
+
+    // Open Unified Drawer triggers
+    dom.openMenuDrawerBtn.addEventListener('click', () => openAppDrawer(dom.openMenuDrawerBtn));
+    dom.guideOpenMenuBtn.addEventListener('click', () => openAppDrawer(dom.guideOpenMenuBtn));
+    dom.editFiltersFromBarBtn.addEventListener('click', () => openAppDrawer(dom.editFiltersFromBarBtn));
 
     // Sort select
     dom.sortSelect.addEventListener('change', () => {
@@ -1681,10 +1837,9 @@
       renderCurrentView();
     });
 
-    // Filter Drawer Controls
-    dom.openFilterDrawerBtn.addEventListener('click', openFilterDrawer);
-    dom.closeFilterDrawerBtn.addEventListener('click', requestCloseFilterDrawer);
-    dom.filterDrawerBackdrop.addEventListener('click', requestCloseFilterDrawer);
+    // Unified Drawer Controls
+    dom.closeAppDrawerBtn.addEventListener('click', requestCloseAppDrawer);
+    dom.appDrawerBackdrop.addEventListener('click', requestCloseAppDrawer);
 
     dom.drawerFilterDept.addEventListener('change', () => {
       state.draftFilters.dept = dom.drawerFilterDept.value;
@@ -1706,10 +1861,97 @@
 
     dom.drawerApplyBtn.addEventListener('click', applyDraftFiltersAndClose);
 
+    // Drawer Management Menu Operations
+    dom.menuExcelUploadBtn.addEventListener('click', () => {
+      closeAppDrawerImmediate();
+      dom.uploadPanel.classList.remove('hidden');
+      dom.uploadPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      const fileLabel = dom.uploadPanel.querySelector('.file-select-label');
+      if (fileLabel) fileLabel.focus();
+    });
+
+    dom.menuLoadSampleBtn.addEventListener('click', () => {
+      closeAppDrawerImmediate();
+      requestLoadSampleDataset();
+    });
+
+    dom.menuExportIcsBtn.addEventListener('click', () => {
+      closeAppDrawerImmediate();
+      exportPinnedToICS();
+    });
+
+    dom.menuPrintBtn.addEventListener('click', () => {
+      closeAppDrawerImmediate();
+      preparePrintTable();
+      requestAnimationFrame(() => {
+        window.print();
+      });
+    });
+
+    dom.menuClearPinsBtn.addEventListener('click', () => {
+      const pinnedCount = state.records.filter((r) => state.pinnedKeys.has(r.stableKey)).length;
+      if (pinnedCount === 0) {
+        showToast('解除するマイ試験日程が登録されていません');
+        return;
+      }
+      openActionConfirmModal({
+        title: 'マイ試験日程をすべて解除しますか？',
+        message: `登録済みのマイ試験日程（${pinnedCount}件）がすべて解除されます。読み込まれている試験データ自体は削除されません。`,
+        confirmLabel: 'すべて解除する',
+        confirmVariant: 'danger',
+        onConfirm: async () => {
+          state.pinnedKeys.clear();
+          await StorageService.set('pinnedKeys', []);
+          detectPinnedConflicts();
+          updateHeaderAndCounts();
+          syncDetailModalPinButton();
+          renderCurrentView();
+          closeAppDrawerImmediate();
+          showToast('マイ試験日程の登録をすべて解除しました');
+        }
+      });
+    });
+
+    dom.menuResetDbBtn.addEventListener('click', () => {
+      const totalCount = state.records.length;
+      const pinnedCount = state.pinnedKeys.size;
+      openActionConfirmModal({
+        title: '保存データをすべて削除しますか？',
+        message: `ブラウザ内に保存されている試験日程データ（${totalCount}件）とマイ試験日程の登録（${pinnedCount}件）がすべて削除されます。この操作は取り消せません。`,
+        confirmLabel: 'すべて削除する',
+        confirmVariant: 'danger',
+        onConfirm: async () => {
+          await StorageService.clearAll();
+          state.records = [];
+          state.meta = null;
+          state.pinnedKeys.clear();
+          state.appliedFilters = createEmptyFilters();
+          state.draftFilters = createEmptyFilters();
+          dom.searchInput.value = '';
+          dom.clearSearchBtn.classList.add('hidden');
+          dom.uploadPanel.classList.remove('hidden');
+          refreshAllUI();
+          closeAppDrawerImmediate();
+          showToast('保存データをすべて削除しました');
+        }
+      });
+    });
+
     // Unsaved Changes Confirmation Modal Actions
     dom.unsavedApplyBtn.addEventListener('click', applyDraftFiltersAndClose);
     dom.unsavedDiscardBtn.addEventListener('click', discardDraftFiltersAndClose);
     dom.unsavedModalBackdrop.addEventListener('click', closeUnsavedConfirmModal);
+
+    // Destructive / Overwrite Action Confirmation Modal Actions
+    dom.actionModalCancelBtn.addEventListener('click', closeActionConfirmModal);
+    dom.actionModalBackdrop.addEventListener('click', closeActionConfirmModal);
+    dom.actionModalConfirmBtn.addEventListener('click', async () => {
+      const fn = state.pendingConfirmAction;
+      closeActionConfirmModal();
+      if (typeof fn === 'function') {
+        await fn();
+      }
+    });
 
     // Subject Detail Modal Actions
     dom.closeDetailModalBtn.addEventListener('click', closeDetailModal);
@@ -1723,7 +1965,16 @@
 
     // Global Keyboard Navigation (Esc & Focus Traps)
     document.addEventListener('keydown', (e) => {
-      // Priority 1: Unsaved Confirmation Modal
+      if (state.isActionModalOpen) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          closeActionConfirmModal();
+        } else {
+          handleContainerTabTrap(e, dom.actionConfirmModal);
+        }
+        return;
+      }
+
       if (state.isUnsavedModalOpen) {
         if (e.key === 'Escape') {
           e.preventDefault();
@@ -1734,7 +1985,6 @@
         return;
       }
 
-      // Priority 2: Subject Detail Modal
       if (state.activeDetailRecord) {
         if (e.key === 'Escape') {
           e.preventDefault();
@@ -1745,44 +1995,14 @@
         return;
       }
 
-      // Priority 3: Left Filter Drawer
       if (state.isDrawerOpen) {
         if (e.key === 'Escape') {
           e.preventDefault();
-          requestCloseFilterDrawer();
+          requestCloseAppDrawer();
         } else {
-          handleContainerTabTrap(e, dom.filterDrawer);
+          handleContainerTabTrap(e, dom.appDrawer);
         }
       }
-    });
-
-    // Export ICS / Clear Pins / Reset DB
-    dom.exportIcsBtn.addEventListener('click', exportPinnedToICS);
-
-    dom.clearPinsBtn.addEventListener('click', async () => {
-      if (state.pinnedKeys.size === 0) return;
-      state.pinnedKeys.clear();
-      await StorageService.set('pinnedKeys', []);
-      detectPinnedConflicts();
-      updateHeaderAndCounts();
-      syncDetailModalPinButton();
-      renderCurrentView();
-      showToast('マイ試験日程の登録をすべて解除しました');
-    });
-
-    dom.resetDbBtn.addEventListener('click', async () => {
-      if (!confirm('保存されている試験日程データベースとマイ日程をすべて削除しますか？')) return;
-      await StorageService.clearAll();
-      state.records = [];
-      state.meta = null;
-      state.pinnedKeys.clear();
-      state.appliedFilters = createEmptyFilters();
-      state.draftFilters = createEmptyFilters();
-      dom.searchInput.value = '';
-      dom.clearSearchBtn.classList.add('hidden');
-      dom.uploadPanel.classList.remove('hidden');
-      refreshAllUI();
-      showToast('データベースを初期化しました');
     });
   }
 
@@ -1791,8 +2011,8 @@
   // =========================================================================
   async function init() {
     bindEvents();
+    setupProgressiveScrollObserver();
 
-    // Show skeleton only if IndexedDB restoration takes longer than initial paint
     let initLoaded = false;
     const slowStorageTimer = setTimeout(() => {
       if (!initLoaded) {
@@ -1812,7 +2032,11 @@
       }
 
       if (Array.isArray(savedRecords) && savedRecords.length > 0) {
-        state.records = savedRecords;
+        // Ensure backward compatibility with existing stored records
+        state.records = savedRecords.map((rec) => ({
+          ...rec,
+          subjectSortKey: rec.subjectSortKey || makeSubjectSortKey(rec.subject)
+        }));
         state.meta = savedMeta;
         dom.uploadPanel.classList.add('hidden');
       } else {
