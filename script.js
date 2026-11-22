@@ -463,6 +463,8 @@
     detailModalPinBtn: document.getElementById('detailModalPinBtn'),
     detailModalCloseFooterBtn: document.getElementById('detailModalCloseFooterBtn'),
 
+    menuShareSiteBtn: document.getElementById('menuShareSiteBtn'),
+
     toast: document.getElementById('toast')
   };
 
@@ -1674,6 +1676,36 @@
   }
 
   // =========================================================================
+  // 15b. Share This Site (Web Share API -> X intent fallback)
+  // =========================================================================
+  const SHARE_TEXT = '大学の試験日程Excelを読み込むだけで、自分の試験一覧・日時の重複チェック・カレンダー登録までスマホでできるツールです。';
+  const SHARE_HASHTAGS = '試験日程';
+
+  function getSiteUrl() {
+    const meta = document.querySelector('meta[property="og:url"]');
+    return (meta && meta.content) || window.location.href;
+  }
+
+  async function shareSite() {
+    const url = getSiteUrl();
+    const title = document.title;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, text: SHARE_TEXT, url });
+      } catch {
+        // キャンセル・失敗時は何もせず元の画面に戻る
+      }
+      return;
+    }
+    const intent =
+        'https://twitter.com/intent/tweet' +
+        `?text=${encodeURIComponent(SHARE_TEXT)}` +
+        `&url=${encodeURIComponent(url)}` +
+        `&hashtags=${encodeURIComponent(SHARE_HASHTAGS)}`;
+    window.open(intent, '_blank', 'noopener,noreferrer');
+  }
+
+  // =========================================================================
   // 16. Event Listeners & Progressive Scroll Observer
   // =========================================================================
   function extractDroppedFile(dataTransfer) {
@@ -1879,6 +1911,8 @@
       closeAppDrawerImmediate();
       exportPinnedToICS();
     });
+
+    dom.menuShareSiteBtn.addEventListener('click', shareSite);
 
     dom.menuPrintBtn.addEventListener('click', () => {
       closeAppDrawerImmediate();

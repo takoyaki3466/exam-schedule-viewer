@@ -4,6 +4,30 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>定期試験日程データベース</title>
+
+  <!-- =====================================================================
+       公開URLの設定（リンクプレビュー / 共有機能）
+       URLを変えるときは、下の og:url と og:image / twitter:image を書き換えてください。
+       共有ボタン（script.js）は og:url の値を読み取って使います。
+       ===================================================================== -->
+  <meta name="description" content="大学から配布された試験日程のExcelを読み込むだけで、スマホで科目を検索・絞り込みでき、自分の試験一覧づくり、日時の重複チェック、カレンダーへの書き出し、印刷までできるツールです。データは端末の外に送信しません。" />
+  <meta name="theme-color" content="#ffffff" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="定期試験日程データベース" />
+  <meta property="og:title" content="定期試験日程データベース｜試験日程をスマホでサッと確認" />
+  <meta property="og:description" content="大学から配布された試験日程のExcelを読み込むだけで、スマホで科目を検索・絞り込みでき、自分の試験一覧づくり、日時の重複チェック、カレンダーへの書き出し、印刷までできるツールです。データは端末の外に送信しません。" />
+  <meta property="og:url" content="https://master.exam-schedule-han.pages.dev/" />
+  <meta property="og:image" content="https://takoyaki3466.github.io/website_img/exam_schedule_viewer_ogp.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="定期試験日程データベースのタイトルと、絞り込み画面・マイ試験日程画面のスマートフォン表示" />
+  <meta property="og:locale" content="ja_JP" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="定期試験日程データベース｜試験日程をスマホでサッと確認" />
+  <meta name="twitter:description" content="大学から配布された試験日程のExcelを読み込むだけで、スマホで科目を検索・絞り込みでき、自分の試験一覧づくり、日時の重複チェック、カレンダーへの書き出し、印刷までできるツールです。データは端末の外に送信しません。" />
+  <meta name="twitter:image" content="https://takoyaki3466.github.io/website_img/exam_schedule_viewer_ogp.png" />
   <link rel="stylesheet" href="style.css" />
   <!-- SheetJS (xlsx) with multi-CDN fallback for reliable local Excel parsing -->
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
@@ -381,7 +405,7 @@
             <line x1="8" y1="2" x2="8" y2="6"></line>
             <line x1="3" y1="10" x2="21" y2="10"></line>
           </svg>
-          <span class="drawer-menu-label">マイ試験日程を .ics で書き出し</span>
+          <span class="drawer-menu-label">カレンダーに書き出す</span>
         </button>
 
         <button type="button" class="drawer-menu-item" id="menuPrintBtn">
@@ -407,6 +431,46 @@
           </svg>
           <span class="drawer-menu-label">保存データの全削除</span>
         </button>
+      </nav>
+    </section>
+
+    <hr class="drawer-divider" />
+
+    <!-- Section C: Support / Feedback -->
+    <section class="drawer-section" aria-labelledby="drawerSupportHeading">
+      <h3 class="drawer-section-heading" id="drawerSupportHeading">サポート</h3>
+
+      <nav class="drawer-menu-list" aria-label="サポートメニュー">
+        <button type="button" class="drawer-menu-item" id="menuShareSiteBtn">
+          <svg class="drawer-menu-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="18" cy="5" r="3"></circle>
+            <circle cx="6" cy="12" r="3"></circle>
+            <circle cx="18" cy="19" r="3"></circle>
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+          </svg>
+          <span class="drawer-menu-label">このサイトを共有</span>
+        </button>
+
+        <!-- フィードバックフォームURL（変更する場合はこの href を書き換えてください） -->
+        <a
+                class="drawer-menu-item"
+                id="menuFeedbackLink"
+                href="https://docs.google.com/forms/d/e/1FAIpQLSes0933n_T6yOyeanC94WdSUgyVNzicsewhQQiXm3oDsYASiw/viewform?usp=dialog"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="ご意見・不具合報告（Googleフォームを新しいタブで開きます）"
+        >
+          <svg class="drawer-menu-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <span class="drawer-menu-label">ご意見・不具合報告</span>
+          <svg class="drawer-menu-icon drawer-menu-external" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+            <polyline points="15 3 21 3 21 9"></polyline>
+            <line x1="10" y1="14" x2="21" y2="3"></line>
+          </svg>
+        </a>
       </nav>
     </section>
   </div>

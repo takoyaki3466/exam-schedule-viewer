@@ -1207,6 +1207,15 @@ body.overlay-open {
   border-color: var(--danger-border);
 }
 
+/* Link variant (feedback form) shares the same look as button menu items */
+a.drawer-menu-item {
+  text-decoration: none;
+}
+
+.drawer-menu-external {
+  color: var(--text-muted);
+}
+
 /* Chips (Unified Height, Padding, Alignment & Constant Size on Select) */
 .chip-group {
   width: 100%;
